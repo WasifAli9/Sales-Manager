@@ -1,0 +1,12 @@
+# Host Caddy runs in Docker (container name: caddy).
+# Edit /opt/caddy/Caddyfile on the server, then:
+#   docker exec -w /etc/caddy caddy caddy reload --config /etc/caddy/Caddyfile
+#
+# DNS: A record salesmanager.creativecloud.ai → 169.58.40.94
+#
+# reverse_proxy uses the app container name on the external "caddy" network.
+
+salesmanager.creativecloud.ai {
+	encode gzip
+	reverse_proxy salesmanager:5000
+}

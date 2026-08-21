@@ -1,0 +1,1626 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Closer — sales command center API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+  - name: products
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+  - name: goals
+  - name: platforms
+  - name: resources
+  - name: activities
+  - name: reflections
+  - name: analyses
+  - name: vision
+  - name: summary
+  - name: ai
+  - name: Auth
+    description: Browser authentication endpoints.
+paths:
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: '#/components/parameters/AuthorizationSessionHeader'
+        - $ref: '#/components/parameters/SessionCookie'
+      responses:
+        '200':
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthUserEnvelope'
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginWithPassword
+      summary: Sign in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated. Session cookie set. `sid` is included for native clients that cannot read Set-Cookie headers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginEnvelope' }
+        '401':
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutSession
+      summary: Clear the session cookie
+      responses:
+        '200':
+          description: Logged out.
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerAccount
+      summary: Create a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created and session set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUserEnvelope' }
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      operationId: forgotPassword
+      summary: Request a password reset email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '200':
+          description: Email sent (always succeeds to prevent enumeration).
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      operationId: resetPassword
+      summary: Consume a reset token and set a new password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '200':
+          description: Password updated.
+        '400':
+          description: Invalid or expired token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /auth/profile:
+    patch:
+      tags: [Auth]
+      operationId: updateProfile
+      summary: Update the authenticated user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthUserEnvelope' }
+        '400':
+          description: Validation error or email already in use.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: changePassword
+      summary: Change password for the authenticated user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '200':
+          description: Password changed.
+        '401':
+          description: Wrong current password.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Product" }
+    post:
+      operationId: createProduct
+      tags: [products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Product
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+    patch:
+      operationId: updateProduct
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Product" }
+    delete:
+      operationId: deleteProduct
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+  /products/{id}/analyze:
+    post:
+      operationId: analyzeProductWebsite
+      tags: [products]
+      summary: Scrape and AI-analyze a product's website, updating all intelligence fields
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Updated product with AI intelligence
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductAnalyzeResponse" }
+
+  /products/{id}/documents:
+    get:
+      operationId: listProductDocuments
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ProductDocument" }
+        "401": { description: Authentication required }
+        "403": { description: Product access denied }
+    post:
+      operationId: createProductDocument
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductDocumentInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "401": { description: Authentication required }
+        "403": { description: Product access denied }
+  /products/{productId}/documents/{docId}:
+    delete:
+      operationId: deleteProductDocument
+      tags: [products]
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: integer } }
+        - { name: docId, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+        "401": { description: Authentication required }
+        "403": { description: Product access denied }
+
+  /pipeline:
+    get:
+      operationId: listPipelineDeals
+      tags: [products]
+      parameters:
+        - { name: productId, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Pipeline deals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PipelineDeal" }
+    post:
+      operationId: createPipelineDeal
+      tags: [products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PipelineDealInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineDeal" }
+  /pipeline/reviews-due:
+    get:
+      operationId: listDueReviews
+      tags: [products]
+      summary: Pipeline deals with reviews due today or overdue
+      parameters:
+        - { name: date, in: query, required: false, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Due reviews
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/DueReview" }
+
+  /pipeline/{id}:
+    patch:
+      operationId: updatePipelineDeal
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PipelineDealUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineDeal" }
+    delete:
+      operationId: deletePipelineDeal
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /sales-targets:
+    get:
+      operationId: listSalesTargets
+      tags: [products]
+      parameters:
+        - { name: productId, in: query, required: true, schema: { type: integer } }
+        - { name: year, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Sales targets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SalesTarget" }
+    post:
+      operationId: upsertSalesTarget
+      tags: [products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SalesTargetInput" }
+      responses:
+        "200":
+          description: Upserted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesTarget" }
+  /sales-targets/{id}:
+    patch:
+      operationId: updateSalesTarget
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SalesTargetUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesTarget" }
+    delete:
+      operationId: deleteSalesTarget
+      tags: [products]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+  /sales-targets/export:
+    get:
+      operationId: exportSalesTargets
+      tags: [products]
+      summary: Download targets as Excel
+      parameters:
+        - { name: productId, in: query, required: true, schema: { type: integer } }
+        - { name: year, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Excel file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+  /sales-targets/email:
+    post:
+      operationId: emailSalesTargets
+      tags: [products]
+      summary: Email targets as Excel attachment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SalesTargetsEmailRequest" }
+      responses:
+        "200":
+          description: Sent
+
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadUrlRequest' }
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadUrlResponse' }
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /storage/public-objects/{filePath}:
+    get:
+      tags: [Storage]
+      operationId: getPublicObject
+      parameters:
+        - { name: filePath, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Object content
+          content:
+            '*/*':
+              schema: { type: string, format: binary }
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      parameters:
+        - { name: objectPath, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Object content
+          content:
+            '*/*':
+              schema: { type: string, format: binary }
+
+  /team:
+    get:
+      operationId: listTeamMembers
+      tags: [team]
+      responses:
+        "200":
+          description: Team members
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/TeamMember" } }
+    post:
+      operationId: createTeamMember
+      tags: [team]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TeamMemberInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamMember" }
+
+  /team/{id}:
+    patch:
+      operationId: updateTeamMember
+      tags: [team]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TeamMemberUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TeamMember" }
+    delete:
+      operationId: deleteTeamMember
+      tags: [team]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /goals/generate:
+    post:
+      operationId: aiSuggestGoals
+      tags: [goals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalGenerateRequest" }
+      responses:
+        "200":
+          description: AI-generated goal suggestions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoalGenerateResponse" }
+
+  /goals/bulk:
+    post:
+      operationId: saveGeneratedGoals
+      tags: [goals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalBulkRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Goal" } }
+
+  /goals:
+    get:
+      operationId: listGoals
+      tags: [goals]
+      parameters:
+        - { name: productId, in: query, required: false, schema: { type: integer } }
+        - { name: kind, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Goals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Goal" }
+    post:
+      operationId: createGoal
+      tags: [goals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+  /goals/{id}:
+    patch:
+      operationId: updateGoal
+      tags: [goals]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+    delete:
+      operationId: deleteGoal
+      tags: [goals]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /platform-states:
+    get:
+      operationId: listPlatformStates
+      tags: [platforms]
+      parameters:
+        - { name: productId, in: query, required: false, schema: { type: integer } }
+      responses:
+        "200":
+          description: Platform states
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PlatformState" }
+    post:
+      operationId: createPlatformState
+      tags: [platforms]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlatformStateInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlatformState" }
+  /platform-states/{id}:
+    patch:
+      operationId: updatePlatformState
+      tags: [platforms]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlatformStateUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlatformState" }
+    delete:
+      operationId: deletePlatformState
+      tags: [platforms]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /resources:
+    get:
+      operationId: listResources
+      tags: [resources]
+      responses:
+        "200":
+          description: Resources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Resource" }
+    post:
+      operationId: createResource
+      tags: [resources]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Resource" }
+  /resources/{id}:
+    patch:
+      operationId: updateResource
+      tags: [resources]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResourceUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Resource" }
+    delete:
+      operationId: deleteResource
+      tags: [resources]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /activities:
+    get:
+      operationId: listActivities
+      tags: [activities]
+      parameters:
+        - { name: date, in: query, required: false, schema: { type: string } }
+        - { name: productId, in: query, required: false, schema: { type: integer } }
+        - { name: status, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Activities
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+    post:
+      operationId: createActivity
+      tags: [activities]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+  /activities/{id}:
+    patch:
+      operationId: updateActivity
+      tags: [activities]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+    delete:
+      operationId: deleteActivity
+      tags: [activities]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /reflections:
+    get:
+      operationId: listReflections
+      tags: [reflections]
+      responses:
+        "200":
+          description: Reflections
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Reflection" }
+    post:
+      operationId: createReflection
+      tags: [reflections]
+      description: Submit end-of-day reflection. Server runs the AI coach review and returns it on the created row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReflectionInput" }
+      responses:
+        "201":
+          description: Created with coach feedback
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Reflection" }
+
+  /analyses:
+    get:
+      operationId: listAnalyses
+      tags: [analyses]
+      parameters:
+        - { name: productId, in: query, required: false, schema: { type: integer } }
+        - { name: kind, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Cached AI analyses
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AiAnalysis" }
+
+  /products/{id}/strategist:
+    post:
+      operationId: runStrategist
+      tags: [ai]
+      description: Run the AI marketing strategist for a product for one analysis kind and cache the result.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StrategistRun" }
+      responses:
+        "201":
+          description: Fresh cached analysis
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiAnalysis" }
+
+  /products/{id}/strategy-document:
+    post:
+      operationId: createProductStrategyDocument
+      tags: [ai, products]
+      summary: Combine all completed Strategist analyses into a saved product strategy document
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "201":
+          description: Saved strategy document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProductDocument" }
+        "400":
+          description: One or more required Strategist analyses are missing
+        "401":
+          description: Authentication required
+        "403":
+          description: Product access denied
+        "404":
+          description: Product not found
+
+  /activities/generate:
+    post:
+      operationId: generateActivities
+      tags: [ai]
+      description: Generate today's ranked activity list from cached strategist output + platform stages, enforcing the 90/10 rule.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityGeneration" }
+      responses:
+        "201":
+          description: Generated activities
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Activity" }
+
+  /tool-advisor:
+    post:
+      operationId: runToolAdvisor
+      tags: [ai]
+      description: AI suggests new tools/automations; suggestions are inserted as resources with status=considering.
+      responses:
+        "201":
+          description: Suggested resources
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Resource" }
+
+  /vision-items:
+    get:
+      operationId: listVisionItems
+      tags: [vision]
+      responses:
+        "200":
+          description: Vision items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/VisionItem" }
+    post:
+      operationId: createVisionItem
+      tags: [vision]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VisionItemInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VisionItem" }
+  /vision-items/{id}:
+    patch:
+      operationId: updateVisionItem
+      tags: [vision]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VisionItemUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VisionItem" }
+    delete:
+      operationId: deleteVisionItem
+      tags: [vision]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  /summary/today:
+    get:
+      operationId: getTodaySummary
+      tags: [summary]
+      description: Command-center summary — Focus Guard split, coach push, counts, pace alerts.
+      parameters:
+        - { name: date, in: query, required: false, schema: { type: string } }
+      responses:
+        "200":
+          description: Today summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TodaySummary" }
+
+  /summary/number:
+    get:
+      operationId: getNumberSummary
+      tags: [summary]
+      description: The single "Number" view — total revenue target vs current across all products.
+      responses:
+        "200":
+          description: Number summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NumberSummary" }
+
+components:
+  parameters:
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        name: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: { type: string }
+        password: { type: string, minLength: 8 }
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        profileImageUrl: { type: ['string', 'null'] }
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 8 }
+
+    TeamMember:
+      type: object
+      required: [id, name, role, createdAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        role: { type: string }
+        focus: { type: ["string", "null"] }
+        hoursPerWeek: { type: ["integer", "null"] }
+        notes: { type: ["string", "null"] }
+        createdAt: { type: string }
+    TeamMemberInput:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string, minLength: 1 }
+        role: { type: string, minLength: 1 }
+        focus: { type: string }
+        hoursPerWeek: { type: integer, minimum: 1, maximum: 168 }
+        notes: { type: string }
+    TeamMemberUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        role: { type: string, minLength: 1 }
+        focus: { type: ["string", "null"] }
+        hoursPerWeek: { type: ["integer", "null"] }
+        notes: { type: ["string", "null"] }
+
+    GoalGenerateRequest:
+      type: object
+      required: [productId]
+      properties:
+        productId: { type: integer }
+        month: { type: integer, minimum: 1, maximum: 12 }
+        year: { type: integer }
+
+    GoalGenerateResponse:
+      type: object
+      required: [goals]
+      properties:
+        goals:
+          type: array
+          items: { $ref: "#/components/schemas/GeneratedGoal" }
+
+    GoalBulkRequest:
+      type: object
+      required: [goals]
+      properties:
+        goals:
+          type: array
+          items: { $ref: "#/components/schemas/GoalInput" }
+
+    GeneratedGoal:
+      type: object
+      required: [kind, title, metric, targetValue, unit, productId]
+      properties:
+        productId: { type: integer }
+        kind: { type: string, enum: [revenue, activity, thirty_day] }
+        title: { type: string }
+        metric: { type: string }
+        targetValue: { type: number }
+        unit: { type: string, enum: [currency, count, percent] }
+        rationale: { type: ["string", "null"] }
+        deadline: { type: ["string", "null"] }
+
+    AuthUser:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        name:
+          type: [string, 'null']
+        firstName:
+          type: [string, 'null']
+        lastName:
+          type: [string, 'null']
+        profileImageUrl:
+          type: [string, 'null']
+        role:
+          type: string
+    LoginEnvelope:
+      type: object
+      required: [user, sid]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+        sid:
+          type: string
+          description: Opaque session token. Provided alongside the Set-Cookie header so native clients (React Native / Expo) that cannot read Set-Cookie can store and send it as a Bearer token.
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: '#/components/schemas/AuthUser'
+            - type: 'null'
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string }
+      required: [status]
+
+    Product:
+      type: object
+      required: [id, name, status, createdAt]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        tagline: { type: ["string", "null"] }
+        description: { type: ["string", "null"] }
+        status: { type: string, enum: [active, paused, idea, launching, inactive] }
+        targetMarket: { type: ["string", "null"] }
+        websiteUrl: { type: ["string", "null"] }
+        icp: { type: ["string", "null"] }
+        valueProp: { type: ["string", "null"] }
+        keyFeatures: { type: ["string", "null"] }
+        pricingModel: { type: ["string", "null"] }
+        competitorLandscape: { type: ["string", "null"] }
+        linkedinFilter: { type: ["string", "null"] }
+        aiSummary: { type: ["string", "null"] }
+        websiteAnalyzedAt: { type: ["string", "null"] }
+        fromName: { type: ["string", "null"] }
+        fromEmail: { type: ["string", "null"] }
+        emailSignature: { type: ["string", "null"] }
+        unsubscribeFooterText: { type: ["string", "null"] }
+        unsubscribeSenderLabel: { type: ["string", "null"] }
+        unsubscribeSupportEmail: { type: ["string", "null"] }
+        createdAt: { type: string }
+    ProductInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        tagline: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [active, paused, idea, launching, inactive] }
+        targetMarket: { type: string }
+        websiteUrl: { type: string }
+        fromName: { type: ["string", "null"] }
+        fromEmail: { type: ["string", "null"] }
+        emailSignature: { type: ["string", "null"] }
+        unsubscribeFooterText: { type: ["string", "null"] }
+        unsubscribeSenderLabel: { type: ["string", "null"] }
+        unsubscribeSupportEmail: { type: ["string", "null"] }
+    ProductUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        tagline: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [active, paused, idea, launching, inactive] }
+        targetMarket: { type: string }
+        websiteUrl: { type: string }
+        fromName: { type: ["string", "null"] }
+        fromEmail: { type: ["string", "null"] }
+        emailSignature: { type: ["string", "null"] }
+        unsubscribeFooterText: { type: ["string", "null"] }
+        unsubscribeSenderLabel: { type: ["string", "null"] }
+        unsubscribeSupportEmail: { type: ["string", "null"] }
+    ProductAnalyzeResponse:
+      type: object
+      required: [product]
+      properties:
+        product:
+          $ref: "#/components/schemas/Product"
+
+    Goal:
+      type: object
+      required: [id, kind, title, metric, targetValue, currentValue, unit, createdAt]
+      properties:
+        id: { type: integer }
+        productId: { type: ["integer", "null"] }
+        platform: { type: ["string", "null"] }
+        resourceId: { type: ["integer", "null"] }
+        kind: { type: string, enum: [revenue, activity, thirty_day, platform, charity] }
+        title: { type: string }
+        metric: { type: string }
+        targetValue: { type: number }
+        currentValue: { type: number }
+        unit: { type: string, enum: [currency, count, percent] }
+        deadline: { type: ["string", "null"] }
+        createdAt: { type: string }
+    GoalInput:
+      type: object
+      required: [kind, title, metric, targetValue, unit]
+      properties:
+        productId: { type: integer }
+        platform: { type: string }
+        resourceId: { type: integer }
+        kind: { type: string, enum: [revenue, activity, thirty_day, platform, charity] }
+        title: { type: string, minLength: 1 }
+        metric: { type: string }
+        targetValue: { type: number }
+        currentValue: { type: number }
+        unit: { type: string, enum: [currency, count, percent] }
+        deadline: { type: string }
+    GoalUpdate:
+      type: object
+      properties:
+        productId: { type: ["integer", "null"] }
+        platform: { type: ["string", "null"] }
+        resourceId: { type: ["integer", "null"] }
+        kind: { type: string, enum: [revenue, activity, thirty_day, platform, charity] }
+        title: { type: string, minLength: 1 }
+        metric: { type: string }
+        targetValue: { type: number }
+        currentValue: { type: number }
+        unit: { type: string, enum: [currency, count, percent] }
+        deadline: { type: ["string", "null"] }
+
+    PlatformState:
+      type: object
+      required: [id, platform, stage]
+      properties:
+        id: { type: integer }
+        productId: { type: ["integer", "null"] }
+        platform: { type: string, enum: [linkedin, apollo, email, webinar, youtube, x, canva, heygen, gohighlevel, community, referral, other] }
+        stage: { type: string, enum: [not_started, setup, warming, active, scaling] }
+        lastActivityAt: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+    PlatformStateInput:
+      type: object
+      required: [platform, stage]
+      properties:
+        productId: { type: integer }
+        platform: { type: string, enum: [linkedin, apollo, email, webinar, youtube, x, canva, heygen, gohighlevel, community, referral, other] }
+        stage: { type: string, enum: [not_started, setup, warming, active, scaling] }
+        notes: { type: string }
+    PlatformStateUpdate:
+      type: object
+      properties:
+        stage: { type: string, enum: [not_started, setup, warming, active, scaling] }
+        notes: { type: ["string", "null"] }
+
+    Resource:
+      type: object
+      required: [id, name, category, status]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        category: { type: string, enum: [enrichment, outreach, content, video, scheduling, ai, webinar, other] }
+        status: { type: string, enum: [active, trial, considering, dropped] }
+        monthlyCost: { type: ["number", "null"] }
+        automates: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+    ResourceInput:
+      type: object
+      required: [name, category]
+      properties:
+        name: { type: string, minLength: 1 }
+        category: { type: string, enum: [enrichment, outreach, content, video, scheduling, ai, webinar, other] }
+        status: { type: string, enum: [active, trial, considering, dropped] }
+        monthlyCost: { type: number }
+        automates: { type: string }
+        notes: { type: string }
+    ResourceUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        category: { type: string, enum: [enrichment, outreach, content, video, scheduling, ai, webinar, other] }
+        status: { type: string, enum: [active, trial, considering, dropped] }
+        monthlyCost: { type: ["number", "null"] }
+        automates: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+
+    Activity:
+      type: object
+      required: [id, date, category, title, effortMinutes, priority, status, source]
+      properties:
+        id: { type: integer }
+        date: { type: string }
+        productId: { type: ["integer", "null"] }
+        platform: { type: ["string", "null"] }
+        category: { type: string, enum: [SELL, CX, BUILD, ADMIN] }
+        title: { type: string }
+        description: { type: ["string", "null"] }
+        effortMinutes: { type: integer }
+        priority: { type: integer }
+        status: { type: string, enum: [pending, done, skipped, delegated, deferred] }
+        delegateTo: { type: ["string", "null"] }
+        source: { type: string, enum: [ai, manual] }
+        createdAt: { type: ["string", "null"] }
+        completedAt: { type: ["string", "null"] }
+    ActivityInput:
+      type: object
+      required: [date, category, title]
+      properties:
+        date: { type: string }
+        productId: { type: integer }
+        platform: { type: string }
+        category: { type: string, enum: [SELL, CX, BUILD, ADMIN] }
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        effortMinutes: { type: integer }
+        priority: { type: integer }
+        delegateTo: { type: string }
+    ActivityUpdate:
+      type: object
+      properties:
+        date: { type: string }
+        productId: { type: ["integer", "null"] }
+        platform: { type: ["string", "null"] }
+        category: { type: string, enum: [SELL, CX, BUILD, ADMIN] }
+        title: { type: string, minLength: 1 }
+        description: { type: ["string", "null"] }
+        effortMinutes: { type: integer }
+        priority: { type: integer }
+        status: { type: string, enum: [pending, done, skipped, delegated, deferred] }
+        delegateTo: { type: ["string", "null"] }
+
+    Reflection:
+      type: object
+      required: [id, date, energy, createdAt]
+      properties:
+        id: { type: integer }
+        date: { type: string }
+        wentWell: { type: ["string", "null"] }
+        wentWrong: { type: ["string", "null"] }
+        improvements: { type: ["string", "null"] }
+        coachFeedback: { type: ["string", "null"] }
+        exercise: { type: ["string", "null"] }
+        energy: { type: integer }
+        createdAt: { type: string }
+    ReflectionInput:
+      type: object
+      required: [date, energy]
+      properties:
+        date: { type: string }
+        wentWell: { type: string }
+        wentWrong: { type: string }
+        improvements: { type: string }
+        exercise: { type: string }
+        energy: { type: integer, minimum: 1, maximum: 5 }
+
+    AiAnalysis:
+      type: object
+      required: [id, productId, kind, content, modelUsed, createdAt]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        kind: { type: string, enum: [icp, competitors, value_prop, gtm, cadence] }
+        content: {}
+        modelUsed: { type: string }
+        grounded: { type: boolean }
+        createdAt: { type: string }
+    StrategistRun:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [icp, competitors, value_prop, gtm, cadence] }
+        pastedResearch:
+          type: string
+          description: Optional user-pasted competitor research to ground the competitors analysis.
+    ActivityGeneration:
+      type: object
+      properties:
+        date: { type: string }
+        productId: { type: integer }
+
+    VisionItem:
+      type: object
+      required: [id, kind, title, sortOrder]
+      properties:
+        id: { type: integer }
+        kind: { type: string, enum: [north_star, milestone, charity, image] }
+        title: { type: string }
+        description: { type: ["string", "null"] }
+        targetValue: { type: ["number", "null"] }
+        imageUrl: { type: ["string", "null"] }
+        sortOrder: { type: integer }
+    VisionItemInput:
+      type: object
+      required: [kind, title]
+      properties:
+        kind: { type: string, enum: [north_star, milestone, charity, image] }
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        targetValue: { type: number }
+        imageUrl: { type: string }
+        sortOrder: { type: integer }
+    VisionItemUpdate:
+      type: object
+      properties:
+        kind: { type: string, enum: [north_star, milestone, charity, image] }
+        title: { type: string, minLength: 1 }
+        description: { type: ["string", "null"] }
+        targetValue: { type: ["number", "null"] }
+        imageUrl: { type: ["string", "null"] }
+        sortOrder: { type: integer }
+
+    TodaySummary:
+      type: object
+      required: [date, coachPush, focusGuard, counts, paceAlerts]
+      properties:
+        date: { type: string }
+        coachPush: { type: string }
+        focusGuard:
+          type: object
+          required: [sellCxMinutes, buildAdminMinutes, sellCxPct, status]
+          properties:
+            sellCxMinutes: { type: integer }
+            buildAdminMinutes: { type: integer }
+            sellCxPct: { type: number }
+            status: { type: string, enum: [on_track, warning, drift] }
+        counts:
+          type: object
+          required: [planned, done, skipped, delegated, deferred]
+          properties:
+            planned: { type: integer }
+            done: { type: integer }
+            skipped: { type: integer }
+            delegated: { type: integer }
+            deferred: { type: integer }
+        paceAlerts:
+          type: array
+          items:
+            type: object
+            required: [goalId, title, daysRemaining, requiredDailyPace, currentValue, targetValue, unit]
+            properties:
+              goalId: { type: integer }
+              title: { type: string }
+              daysRemaining: { type: integer }
+              requiredDailyPace: { type: number }
+              currentValue: { type: number }
+              targetValue: { type: number }
+              unit: { type: string }
+
+    ProductDocument:
+      type: object
+      required: [id, productId, name, createdAt]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        name: { type: string }
+        textContent: { type: ["string", "null"] }
+        storageKey: { type: ["string", "null"] }
+        mimeType: { type: ["string", "null"] }
+        fileSizeBytes: { type: ["integer", "null"] }
+        createdAt: { type: string }
+    ProductDocumentInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        textContent: { type: string }
+        storageKey: { type: string }
+        mimeType: { type: string }
+        fileSizeBytes: { type: integer }
+
+    PipelineStage:
+      type: string
+      enum: [prospect, qualified, proposal, negotiation, closed_won, closed_lost]
+
+    PipelineDeal:
+      type: object
+      required: [id, productId, contactName, value, stage, probability, createdAt]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        contactName: { type: string }
+        companyName: { type: ["string", "null"] }
+        value: { type: string }
+        currency: { type: string, enum: [USD, GBP, AED] }
+        stage: { $ref: "#/components/schemas/PipelineStage" }
+        probability: { type: integer }
+        expectedCloseDate: { type: ["string", "null"] }
+        nextReviewDate: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+        createdAt: { type: string }
+
+    DueReview:
+      type: object
+      required: [id, productId, productName, contactName, value, stage, nextReviewDate]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        productName: { type: string }
+        contactName: { type: string }
+        companyName: { type: ["string", "null"] }
+        value: { type: string }
+        stage: { $ref: "#/components/schemas/PipelineStage" }
+        nextReviewDate: { type: string }
+
+    PipelineDealInput:
+      type: object
+      required: [productId, contactName]
+      properties:
+        productId: { type: integer }
+        contactName: { type: string, minLength: 1 }
+        companyName: { type: string }
+        value: { type: number, minimum: 0 }
+        stage: { $ref: "#/components/schemas/PipelineStage" }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        currency: { type: string, enum: [USD, GBP, AED] }
+        expectedCloseDate: { type: string }
+        nextReviewDate: { type: string }
+        notes: { type: string }
+
+    PipelineDealUpdate:
+      type: object
+      properties:
+        contactName: { type: string, minLength: 1 }
+        companyName: { type: ["string", "null"] }
+        value: { type: number, minimum: 0 }
+        currency: { type: string, enum: [USD, GBP, AED] }
+        stage: { $ref: "#/components/schemas/PipelineStage" }
+        probability: { type: integer, minimum: 0, maximum: 100 }
+        expectedCloseDate: { type: ["string", "null"] }
+        nextReviewDate: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+
+    SalesTarget:
+      type: object
+      required: [id, productId, year, month, revenueLine, targetAmount, createdAt]
+      properties:
+        id: { type: integer }
+        productId: { type: integer }
+        year: { type: integer }
+        month: { type: integer }
+        revenueLine: { type: string }
+        targetAmount: { type: string }
+        actualAmount: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+        createdAt: { type: string }
+    SalesTargetInput:
+      type: object
+      required: [productId, year, month, revenueLine, targetAmount]
+      properties:
+        productId: { type: integer }
+        year: { type: integer }
+        month: { type: integer }
+        revenueLine: { type: string, minLength: 1 }
+        targetAmount: { type: number }
+        actualAmount: { type: number }
+        notes: { type: string }
+    SalesTargetUpdate:
+      type: object
+      properties:
+        targetAmount: { type: number }
+        actualAmount: { type: number }
+        notes: { type: string }
+    SalesTargetsEmailRequest:
+      type: object
+      required: [productId, year, recipientEmail]
+      properties:
+        productId: { type: integer }
+        year: { type: integer }
+        recipientEmail: { type: string, format: email }
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
+        metadata: { $ref: '#/components/schemas/UploadUrlRequest' }
+
+    NumberSummary:
+      type: object
+      required: [totalTarget, totalCurrent, pct, perProduct]
+      properties:
+        totalTarget: { type: number }
+        totalCurrent: { type: number }
+        pct: { type: number }
+        perProduct:
+          type: array
+          items:
+            type: object
+            required: [productId, productName, target, current]
+            properties:
+              productId: { type: integer }
+              productName: { type: string }
+              target: { type: number }
+              current: { type: number }

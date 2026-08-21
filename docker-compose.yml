@@ -1,0 +1,55 @@
+name: sales-manager
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-salesmanager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-salesmanager}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - internal
+
+  app:
+    image: ${IMAGE:?Set IMAGE to the GHCR image, e.g. ghcr.io/org/sales-manager:latest}
+    container_name: salesmanager
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${APP_PORT:-3012}:5000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      BASE_PATH: /
+      DATABASE_URL: postgres://${POSTGRES_USER:-salesmanager}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-salesmanager}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-salesmanager}
+      STORAGE_DRIVER: local
+      STORAGE_ROOT: /data
+    volumes:
+      - object_data:/data
+    networks:
+      - internal
+      - caddy
+
+volumes:
+  postgres_data:
+  object_data:
+
+networks:
+  internal:
+  caddy:
+    external: true

@@ -1,0 +1,2 @@
+ALTER TABLE "leads" ALTER COLUMN "lead_type" DROP NOT NULL;
+ALTER TABLE "leads" ALTER COLUMN "lead_type" DROP DEFAULT;
