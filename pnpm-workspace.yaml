@@ -58,11 +58,14 @@ catalog:
 
 autoInstallPeers: false
 
-onlyBuiltDependencies:
-  - '@swc/core'
-  - esbuild
-  - msw
-  - unrs-resolver
+# pnpm 11: unapproved install scripts fail CI (strictDepBuilds defaults to true).
+# Allow the native/tooling packages this repo actually builds; skip the rest.
+strictDepBuilds: false
+allowBuilds:
+  esbuild: true
+  '@swc/core': true
+  msw: true
+  unrs-resolver: true
 
 overrides:
   # Keep linux-x64 (Docker) and win32-x64 (local Windows). Drop other platforms.
@@ -143,6 +146,3 @@ overrides:
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
-
-allowBuilds:
-  esbuild: set this to true or false

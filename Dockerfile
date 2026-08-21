@@ -12,7 +12,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc tsconfig.json tsconf
 COPY artifacts ./artifacts
 COPY lib ./lib
 COPY scripts ./scripts
-RUN printf '\nnode-linker=hoisted\n' >> .npmrc && pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 ENV NODE_ENV=production
