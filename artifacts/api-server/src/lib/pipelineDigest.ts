@@ -3,14 +3,10 @@ import { db, pipelineDealsTable, productsTable, usersTable, digestLogTable } fro
 import { eq } from "drizzle-orm";
 import { sendEmail } from "./email";
 import { logger } from "./logger";
+import { appPublicUrl } from "./appUrl";
 
 function appUrl(): string {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  const domain = process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : "https://closer.replit.app";
-  const base = (process.env.APP_BASE_PATH ?? "/closer").replace(/\/$/, "");
-  return `${domain}${base}`;
+  return appPublicUrl();
 }
 
 interface DealRow {

@@ -16,10 +16,14 @@ import * as SplashScreen from 'expo-splash-screen';
 import { setBaseUrl } from '@workspace/api-client-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 
-// Set the API base URL once, before any component mounts.
-// On native, EXPO_PUBLIC_DOMAIN is the Replit dev domain and API calls go
-// straight to the server without CORS restrictions.
-setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+const apiBase =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (process.env.EXPO_PUBLIC_DOMAIN
+    ? process.env.EXPO_PUBLIC_DOMAIN.startsWith('http')
+      ? process.env.EXPO_PUBLIC_DOMAIN
+      : `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+    : 'https://salesmanager.creativecloud.ai');
+setBaseUrl(apiBase);
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();

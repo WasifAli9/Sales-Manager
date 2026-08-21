@@ -6,7 +6,7 @@ description: Which OpenAI image model to use and how — proxy vs direct client,
 ## Rule
 Use `imageOpenAI = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })` directly for all image generation and vision analysis. Never use the `@workspace/integrations-openai-ai-server` proxy for image calls.
 
-**Why:** The AI Integration proxy only routes chat/text completions. It returns `400 Model 'dall-e-3' is not supported` (and similar) for any image generation call. The direct `OPENAI_API_KEY` client bypasses the proxy and hits OpenAI's API directly.
+**Why:** `@workspace/integrations-openai-ai-server` is for chat/text. Image models need a direct `OPENAI_API_KEY` client.
 
 ## Available image models (confirmed August 2026)
 - `gpt-image-1`, `gpt-image-1-mini`, `gpt-image-1.5`, `gpt-image-2`, `chatgpt-image-latest` — present on this account

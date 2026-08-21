@@ -13,17 +13,15 @@ import { db } from "@workspace/db";
 import { socialAccountsTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { appPublicUrl } from "../lib/appUrl";
 
 const router = Router();
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function getOrigin(req: Request): string {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  if (process.env.PUBLIC_APP_URL) return process.env.PUBLIC_APP_URL.replace(/\/$/, "");
-  return process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : `${req.protocol}://${req.get("host")}`;
+  if (process.env.APP_URL || process.env.PUBLIC_APP_URL) return appPublicUrl();
+  return `${req.protocol}://${req.get("host")}`;
 }
 
 /** Frontend base path — matches vite's BASE_PATH env var */

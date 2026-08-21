@@ -19,7 +19,6 @@ export const usersTable = pgTable('users', {
   name: varchar('name'),
   passwordHash: varchar('password_hash'),
   role: varchar('role').notNull().default('owner'), // 'owner' | 'member'
-  // Legacy Replit Auth fields — kept nullable for existing rows
   firstName: varchar('first_name'),
   lastName: varchar('last_name'),
   profileImageUrl: varchar('profile_image_url'),

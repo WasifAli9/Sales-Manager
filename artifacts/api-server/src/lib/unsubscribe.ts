@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { appPublicUrl } from "./appUrl";
 
 export type UnsubscribeFooterConfig = {
   productName?: string | null;
@@ -16,16 +17,7 @@ function escapeHtml(value: string): string {
 }
 
 function publicAppUrl(): string {
-  const configured = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
-  if (configured) return configured;
-
-  const domain = process.env.REPLIT_DOMAINS
-    ?.split(",")
-    .map((value) => value.trim())
-    .find(Boolean);
-  if (domain) return `https://${domain.replace(/^https?:\/\//, "")}`;
-
-  throw new Error("A public application URL is required to send emails with an unsubscribe link");
+  return appPublicUrl();
 }
 
 export function createUnsubscribeToken(): string {

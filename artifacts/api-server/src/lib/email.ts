@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { logger } from "./logger";
+import { appPublicUrl } from "./appUrl";
 
 const FROM = process.env.RESEND_FROM ?? "Closer <onboarding@resend.dev>";
 
@@ -81,16 +82,6 @@ export function interpolate(
     lcVars[k.toLowerCase()] = v;
   }
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => lcVars[key.toLowerCase()] ?? "");
-}
-
-function appPublicUrl(): string {
-  return (
-    process.env.PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    process.env.APP_URL?.replace(/\/$/, "") ||
-    (process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : "https://salesmanager.creativecloud.ai")
-  );
 }
 
 /** Coach morning push email */

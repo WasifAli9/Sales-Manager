@@ -41,8 +41,6 @@ app.listen(port, (err) => {
   };
 
   // Schema is applied by docker/entrypoint.sh (`drizzle-kit push`) on Contabo.
-  // Replit Publish still owns production schema there — do not replay SQL
-  // migrations against a DB that was already diffed.
   if (
     process.env.SKIP_SQL_MIGRATIONS === "true" ||
     (process.env.NODE_ENV === "production" && process.env.RUN_SQL_MIGRATIONS !== "true")
@@ -59,9 +57,7 @@ app.listen(port, (err) => {
     })
     .catch((err) => {
       logger.error({ err }, "Migrations failed — exiting so the container restarts automatically");
-      // Exit with a non-zero code so the process manager (Replit / Docker)
-      // restarts the container. Staying alive would leave every /api route
-      // returning 503 indefinitely with no automatic recovery path.
+      // Exit with a non-zero code so Docker restarts the container.
       process.exit(1);
     });
 });

@@ -3,8 +3,7 @@
 - [Revenue lines schema and volume model](revenue-lines-schema.md) — separate revenue_lines table (no year), unit_value × monthly volume = revenue, three roles: owner/admin/member.
 - [Lead type flag](lead-type-flag.md) — end_user/reseller column on leads; migration 0020; filter param on GET /api/leads; picker in Add Lead dialog and Apollo import dialog.
 - [Light mode toggle](light-mode-toggle.md) — dark-first CSS vars in :root; .light class overrides in index.css; useTheme hook in hooks/use-theme.ts; --sidebar-bg/--shell-bg vars consumed via inline style in layout.tsx.
-- [GPT image model selection](gpt-image-model.md) — use imageOpenAI (direct OPENAI_API_KEY) for all images/vision; proxy doesn't support image models; gpt-image-1 returns b64_json not URL; quality values differ from dall-e-3.
-- [Drizzle migration production sync](drizzle-migration-prod-sync.md) — stale hashes in drizzle.__drizzle_migrations cause silent skips; fix with push-force on dev, then republish.
+- [GPT image model selection](gpt-image-model.md) — use imageOpenAI (direct OPENAI_API_KEY) for all images/vision; chat client does not support image models; gpt-image-1 returns b64_json not URL; quality values differ from dall-e-3.
 - [Resend email engagement tracking](resend-email-tracking.md) — signed events are idempotent by provider ID; map by message ID and preserve provider-time ordering.
 - [Database-backed API test runner](database-api-test-runner.md) — Node strip-types cannot resolve workspace source exports; bundle database route tests with esbuild as CommonJS.
 - [Outbound email suppression](outbound-email-suppression.md) — opt-outs are global at lead level, resolved via opaque per-send tokens; only queued sends are cancellable.

@@ -15,6 +15,7 @@ import {
 } from '../lib/auth';
 import { sendEmail } from '../lib/email';
 import { logger } from '../lib/logger';
+import { appPublicUrl } from '../lib/appUrl';
 
 const router = Router();
 
@@ -167,11 +168,10 @@ router.post('/auth/forgot-password', async (req: Request, res: Response): Promis
 
   // Build reset URL — APP_URL takes priority (production custom domain)
   const origin =
-    process.env.APP_URL?.replace(/\/$/, '') ??
-    (process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : `${req.protocol}://${req.get('host')}`);
-  const base = process.env.APP_URL ? '' : (process.env.APP_BASE_PATH ?? '/closer').replace(/\/$/, '');
+    process.env.APP_URL || process.env.PUBLIC_APP_URL
+      ? appPublicUrl()
+      : `${req.protocol}://${req.get('host')}`;
+  const base = process.env.APP_URL ? '' : (process.env.APP_BASE_PATH ?? '').replace(/\/$/, '');
   const resetUrl = `${origin}${base}/reset-password?token=${rawToken}`;
 
   try {

@@ -10,12 +10,12 @@ import { sendEmail } from "../lib/email";
 import { runMonthlyAutoGenerate } from "../lib/runMonthlyAutoGenerate";
 import { randomUUID } from "crypto";
 import { openai } from "@workspace/integrations-openai-ai-server";
-// Separate direct client for DALL-E image generation — the AI Integration proxy
-// only supports chat/text models and returns 400 for dall-e-3.
+// Direct OpenAI client for image generation — chat helpers do not support DALL-E.
 import { createDirectOpenAI } from "../lib/ai";
 const imageOpenAI = createDirectOpenAI();
 import { objectStorageClient } from "../lib/objectStorage";
 import { logger } from "../lib/logger";
+import { appPublicUrl } from "../lib/appUrl";
 import {
   evaluateSkipGate,
   applyProductResult,
@@ -198,8 +198,8 @@ async function storeImageFromUrl(imageUrl: string, folder = "social-images"): Pr
 
 async function generateAndStoreImage(prompt: string): Promise<string | null> {
   try {
-    // Use OPENAI_API_KEY directly — the AI Integration proxy does not support
-    // image models. gpt-image-1 returns base64 JSON (no URL), so we convert
+    // Use OPENAI_API_KEY directly for image models. gpt-image-1 returns
+    // base64 JSON (no URL), so we convert
     // to a buffer and store it directly without a second fetch.
     const result = await imageOpenAI.images.generate({
       model: "gpt-image-1",
@@ -864,12 +864,7 @@ export async function generateScheduleForProduct(
 // ── Helpers for notification email ───────────────────────────────────────────
 
 function appUrl(): string {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  const domain = process.env.REPLIT_DEV_DOMAIN
-    ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : "https://closer.replit.app";
-  const base = (process.env.APP_BASE_PATH ?? "/closer").replace(/\/$/, "");
-  return `${domain}${base}`;
+  return appPublicUrl();
 }
 
 function escapeHtml(s: string): string {

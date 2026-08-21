@@ -30,7 +30,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://salesmanager.creativecloud.ai"
         }
       ],
       "expo-font",

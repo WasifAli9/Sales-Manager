@@ -8,19 +8,19 @@ import { requireOwner } from "../middlewares/requireOwner";
 import { sendEmail } from "../lib/email";
 import { logger } from "../lib/logger";
 import { createSession, SESSION_COOKIE, SESSION_TTL, cookieSecure } from "../lib/auth";
+import { appPublicUrl } from "../lib/appUrl";
 
 const router = Router();
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function inviteOriginAndBase(req: import("express").Request) {
   const origin =
-    process.env.APP_URL?.replace(/\/$/, "") ??
-    (process.env.REPLIT_DEV_DOMAIN
-      ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-      : `${req.protocol}://${req.get("host")}`);
+    process.env.APP_URL || process.env.PUBLIC_APP_URL
+      ? appPublicUrl()
+      : `${req.protocol}://${req.get("host")}`;
   const base = process.env.APP_URL
     ? ""
-    : (process.env.APP_BASE_PATH ?? "/closer").replace(/\/$/, "");
+    : (process.env.APP_BASE_PATH ?? "").replace(/\/$/, "");
   return { origin, base };
 }
 
