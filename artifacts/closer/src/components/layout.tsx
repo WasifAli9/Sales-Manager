@@ -238,23 +238,23 @@ function MobileNav() {
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="h-[100dvh] w-full text-foreground overflow-hidden lg:flex"
+      className="flex min-h-dvh flex-col text-foreground lg:h-dvh lg:min-h-0 lg:flex-row lg:overflow-hidden"
       style={{ backgroundColor: "var(--shell-bg)" }}
     >
       <SideNav />
 
-      <div className="flex-1 flex justify-center overflow-hidden lg:justify-start lg:bg-background">
+      <div className="flex min-h-0 min-w-0 flex-1 justify-center lg:justify-start lg:overflow-hidden lg:bg-background">
         <div
           className={cn(
-            "w-full bg-background h-full relative flex flex-col overflow-hidden",
+            "relative flex w-full min-h-dvh flex-col bg-background",
             "max-w-md shadow-2xl border-x border-border/20",
-            "lg:max-w-none lg:shadow-none lg:border-none",
+            "lg:h-full lg:min-h-0 lg:max-w-none lg:overflow-hidden lg:shadow-none lg:border-none",
           )}
         >
           <MobileNav />
-          <main className="app-scroll flex-1 overflow-y-auto overflow-x-hidden flex flex-col w-full relative min-h-0">
+          <main className="relative min-w-0 flex-1 overflow-x-hidden lg:app-scroll lg:min-h-0 lg:overflow-y-auto">
             <PasskeySetupBanner />
-            <div className="flex-1 flex flex-col lg:max-w-5xl lg:w-full lg:mx-auto lg:self-start lg:min-h-full">
+            <div className="lg:mx-auto lg:w-full lg:max-w-5xl">
               {children}
             </div>
           </main>
