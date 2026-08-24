@@ -90,7 +90,7 @@ export default function AcceptInvitePage() {
             <KeyRound className="w-6 h-6 text-primary" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Accept your invitation</h1>
-          <p className="text-sm text-muted-foreground">Set a password to activate your Closer account.</p>
+          <p className="text-sm text-muted-foreground">Set a password to activate your Sales Manager account.</p>
         </div>
 
         {success ? (

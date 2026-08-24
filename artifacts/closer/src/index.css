@@ -176,6 +176,14 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   * {
     @apply border-border;
   }
@@ -199,6 +207,11 @@
   }
   .pt-safe {
     padding-top: env(safe-area-inset-top);
+  }
+
+  .app-scroll {
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .no-default-hover-elevate { }

@@ -10,7 +10,7 @@ function confirmationPage(message: string, status = 200): string {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email preferences</title></head>
 <body style="margin:0;background:#0b1220;color:#f2f5fa;font-family:system-ui,-apple-system,sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px">
   <main style="max-width:480px;border:1px solid #2a3550;border-radius:18px;background:#131c2e;padding:32px;text-align:center">
-    <p style="margin:0 0 12px;color:#4dd4c1;font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase">Closer</p>
+    <p style="margin:0 0 12px;color:#4dd4c1;font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase">Sales Manager</p>
     <h1 style="margin:0 0 12px;font-size:24px">Email preferences updated</h1>
     <p style="margin:0;color:#b5c0d8;line-height:1.6">${message}</p>
   </main>

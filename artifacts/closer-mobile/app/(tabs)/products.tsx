@@ -165,7 +165,7 @@ export default function ProductsScreen() {
             <Feather name="package" size={36} color={colors.mutedForeground} />
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No products yet</Text>
             <Text style={[styles.emptySubText, { color: colors.mutedForeground }]}>
-              Add products from the Closer web app.
+              Add products from the Sales Manager web app.
             </Text>
           </View>
         ) : (

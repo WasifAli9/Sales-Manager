@@ -100,7 +100,7 @@ export function MenuDrawer() {
       >
         {/* App name */}
         <View style={styles.brandRow}>
-          <Text style={[styles.brandName, { color: colors.primary }]}>Closer</Text>
+          <Text style={[styles.brandName, { color: colors.primary }]}>Sales Manager</Text>
           <TouchableOpacity onPress={closeMenu} style={styles.closeBtn} hitSlop={12}>
             <Feather name="x" size={20} color={colors.mutedForeground} />
           </TouchableOpacity>

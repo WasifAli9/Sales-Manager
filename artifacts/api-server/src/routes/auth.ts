@@ -177,7 +177,7 @@ router.post('/auth/forgot-password', async (req: Request, res: Response): Promis
   try {
     await sendEmail({
       to: user.email,
-      subject: 'Reset your Closer password',
+      subject: 'Reset your Sales Manager password',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0B1220;color:#e2e8f0;border-radius:16px">
           <h1 style="font-size:24px;font-weight:800;margin:0 0 8px">Reset your password</h1>

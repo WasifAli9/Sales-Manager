@@ -141,7 +141,7 @@ Improvements he already sees: ${data.improvements ?? "-"}`,
     const dateLabel = data.date;
     sendEmail({
       to: req.user.email,
-      subject: `Closer — your verdict for ${dateLabel}`,
+      subject: `Sales Manager — your verdict for ${dateLabel}`,
       html: coachPushEmail(coachFeedback, dateLabel),
       text: coachFeedback,
     }).catch(() => {});

@@ -154,7 +154,7 @@ function SideNav() {
             <TrendingUp className="w-4 h-4 text-primary" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-bold text-sm leading-none text-foreground">Closer</p>
+            <p className="font-bold text-sm leading-none text-foreground">Sales Manager</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Sales Command Centre
             </p>
@@ -191,7 +191,7 @@ function MobileNav() {
           </div>
           <div className="min-w-0">
             <p className="font-bold text-sm leading-none text-foreground truncate">
-              Closer
+              Sales Manager
             </p>
             <p className="text-[10px] text-muted-foreground truncate">
               Sales Command Centre
@@ -218,7 +218,7 @@ function MobileNav() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-bold text-sm leading-none text-foreground">
-                    Closer
+                    Sales Manager
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
                     Sales Command Centre
@@ -252,7 +252,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           )}
         >
           <MobileNav />
-          <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col w-full relative min-h-0">
+          <main className="app-scroll flex-1 overflow-y-auto overflow-x-hidden flex flex-col w-full relative min-h-0">
             <PasskeySetupBanner />
             <div className="flex-1 flex flex-col lg:max-w-5xl lg:w-full lg:mx-auto lg:self-start lg:min-h-full">
               {children}

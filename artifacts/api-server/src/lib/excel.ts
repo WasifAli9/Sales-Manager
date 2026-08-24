@@ -32,7 +32,7 @@ function money(n: number | null): number {
 export async function buildTargetWorkbook(opts: ExcelBuildOptions): Promise<Buffer> {
   const { productName, year, rows } = opts;
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Closer";
+  wb.creator = "Sales Manager";
   wb.created = new Date();
 
   const ws = wb.addWorksheet(`${productName} ${year}`, {

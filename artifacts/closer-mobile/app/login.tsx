@@ -87,7 +87,7 @@ export default function LoginScreen() {
           <View style={styles.logoRing}>
             <Text style={styles.logoLetter}>C</Text>
           </View>
-          <Text style={styles.brandName}>Closer</Text>
+          <Text style={styles.brandName}>Sales Manager</Text>
           <Text style={styles.brandTagline}>Your sales command center</Text>
         </View>
 

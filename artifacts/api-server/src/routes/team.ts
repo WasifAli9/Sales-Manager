@@ -154,10 +154,10 @@ router.post("/team/:id/invite", requireOwner, async (req, res): Promise<void> =>
   try {
     await sendEmail({
       to: normalizedEmail,
-      subject: `${req.user?.name ?? "Your team"} invited you to Closer`,
+      subject: `${req.user?.name ?? "Your team"} invited you to Sales Manager`,
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0B1220;color:#e2e8f0;border-radius:16px">
-          <h1 style="font-size:24px;font-weight:800;margin:0 0 8px">You're invited to Closer</h1>
+          <h1 style="font-size:24px;font-weight:800;margin:0 0 8px">You're invited to Sales Manager</h1>
           <p style="color:#94a3b8;margin:0 0 8px">
             <strong style="color:#e2e8f0">${member.name}</strong> (${member.role}) has been invited to join the team.
           </p>

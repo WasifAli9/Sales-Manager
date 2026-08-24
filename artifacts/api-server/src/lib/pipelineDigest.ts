@@ -166,7 +166,7 @@ function buildEmail(
       </div>
     </div>
 
-    <p style="color:#3A4660;font-size:11px;text-align:center;margin-top:16px;">Closer · Daily digest · Sent each morning at 7 AM</p>
+    <p style="color:#3A4660;font-size:11px;text-align:center;margin-top:16px;">Sales Manager · Daily digest · Sent each morning at 7 AM</p>
   </div>
 </body>
 </html>`;

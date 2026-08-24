@@ -53,7 +53,7 @@ export default function ResetPasswordPage() {
         <div className="bg-primary/15 rounded-3xl p-5">
           <TrendingUp className="w-10 h-10 text-primary" />
         </div>
-        <h1 className="text-3xl font-black tracking-tight text-foreground">Closer</h1>
+        <h1 className="text-3xl font-black tracking-tight text-foreground">Sales Manager</h1>
       </motion.div>
 
       <motion.div

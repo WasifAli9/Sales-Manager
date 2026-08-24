@@ -88,7 +88,7 @@ export default function LoginPage() {
           <TrendingUp className="w-10 h-10 text-primary" />
         </div>
         <div className="text-center">
-          <h1 className="text-4xl font-black tracking-tight text-foreground">Closer</h1>
+          <h1 className="text-4xl font-black tracking-tight text-foreground">Sales Manager</h1>
           <p className="text-muted-foreground text-sm mt-1 font-medium">Your sales command center</p>
         </div>
       </motion.div>

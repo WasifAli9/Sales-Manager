@@ -194,7 +194,7 @@ export default function SettingsScreen() {
           <View style={[styles.warningRow, { backgroundColor: colors.destructive + '11' }]}>
             <Feather name="alert-triangle" size={13} color={colors.destructive} />
             <Text style={[styles.warningText, { color: colors.destructive }]}>
-              Notifications are blocked. Enable them in iOS Settings → Closer.
+              Notifications are blocked. Enable them in iOS Settings → Sales Manager.
             </Text>
           </View>
         )}
@@ -251,7 +251,7 @@ export default function SettingsScreen() {
         <View style={[styles.appLogoRing, { backgroundColor: colors.primary }]}>
           <Text style={[styles.appLogoLetter, { color: colors.primaryForeground }]}>C</Text>
         </View>
-        <Text style={[styles.appName, { color: colors.mutedForeground }]}>Closer Mobile</Text>
+        <Text style={[styles.appName, { color: colors.mutedForeground }]}>Sales Manager Mobile</Text>
         <Text style={[styles.appVersion, { color: colors.muted }]}>v1.0.0</Text>
       </View>
       </ScrollView>

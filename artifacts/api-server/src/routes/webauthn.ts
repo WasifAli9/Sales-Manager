@@ -66,10 +66,10 @@ router.post("/webauthn/register/options", async (req: Request, res: Response) =>
     .where(eq(webauthnCredentialsTable.userId, user.id));
 
   const options = await generateRegistrationOptions({
-    rpName: "Closer",
+    rpName: "Sales Manager",
     rpID: getRpId(req),
     userName: user.email ?? user.id,
-    userDisplayName: [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Closer User",
+    userDisplayName: [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Sales Manager User",
     attestationType: "none",
     excludeCredentials: existing.map((c) => ({
       id: c.credentialId,
