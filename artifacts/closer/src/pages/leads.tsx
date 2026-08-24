@@ -4,6 +4,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Progress } from "@/components/ui/progress"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/hooks/use-toast"
@@ -206,7 +216,22 @@ async function patchLead(id: number, data: Record<string, unknown>): Promise<Lea
 }
 
 async function deleteLead(id: number): Promise<void> {
-  await fetch(`${BASE}/api/leads/${id}`, { method: "DELETE", credentials: "include" })
+  const res = await fetch(`${BASE}/api/leads/${id}`, { method: "DELETE", credentials: "include" })
+  if (!res.ok) throw new Error("Failed to delete lead")
+}
+
+async function deleteLeadsBulk(leadIds: number[]): Promise<{ deleted: number }> {
+  const res = await fetch(`${BASE}/api/leads/bulk-delete`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ leadIds }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    throw new Error(body?.error || "Failed to delete leads")
+  }
+  return res.json()
 }
 
 interface AiSuggestion {
@@ -1860,6 +1885,8 @@ export default function LeadsPage() {
   const [bulkScheduleOpen, setBulkScheduleOpen] = useState(false)
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
   const [bulkTagsOpen, setBulkTagsOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [statusFilter, setStatusFilter] = useState("all")
   const [productFilter, setProductFilter] = useState<number | "all">("all")
   const [leadTypeFilter, setLeadTypeFilter] = useState<"all" | "end_user" | "reseller">("all")
@@ -1893,6 +1920,29 @@ export default function LeadsPage() {
     })
 
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    setBulkDeleting(true)
+    try {
+      const result = await deleteLeadsBulk(ids)
+      await qc.invalidateQueries({ queryKey: ["leads"] })
+      toast({
+        title: `${result.deleted} lead${result.deleted === 1 ? "" : "s"} deleted`,
+      })
+      setBulkDeleteOpen(false)
+      exitSelectMode()
+    } catch (error) {
+      toast({
+        title: "Could not delete leads",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
 
   // Debounce search
   const handleSearch = (v: string) => {
@@ -2196,7 +2246,7 @@ export default function LeadsPage() {
             {selectMode && (
               <div className="flex items-center gap-2 p-2.5 rounded-xl bg-primary/5 border border-primary/20">
                 <CheckSquare2 className="w-4 h-4 text-primary shrink-0" />
-                <p className="text-xs text-primary/80 flex-1">Tap leads to select, then assign or schedule.</p>
+                <p className="text-xs text-primary/80 flex-1">Tap leads to select, then delete, assign, or schedule.</p>
                 <button
                   onClick={() => {
                     if (selectedIds.size === leads.length) {
@@ -2351,17 +2401,17 @@ export default function LeadsPage() {
 
       {/* Floating action bar — shown when leads are selected */}
       {selectMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom)+8px)] left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-md">
-          <div className="flex items-center gap-2 p-2 rounded-2xl bg-card/95 border border-border/40 backdrop-blur-md shadow-xl">
-            <div className="flex-1 px-2">
-              <p className="text-sm font-medium text-foreground">
-                {selectedIds.size} lead{selectedIds.size !== 1 ? "s" : ""} selected
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom)+8px)] left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-lg lg:bottom-6">
+          <div className="flex items-center gap-2 p-2 rounded-2xl bg-card/95 border border-border/40 backdrop-blur-md shadow-xl overflow-x-auto">
+            <div className="flex-1 px-2 min-w-[5.5rem] shrink-0">
+              <p className="text-sm font-medium text-foreground whitespace-nowrap">
+                {selectedIds.size} selected
               </p>
             </div>
             <Button
               size="sm"
               variant="outline"
-              className="border-border/30 text-muted-foreground gap-1.5"
+              className="border-border/30 text-muted-foreground gap-1.5 shrink-0"
               onClick={exitSelectMode}
             >
               <X className="w-3.5 h-3.5" /> Cancel
@@ -2369,7 +2419,15 @@ export default function LeadsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-primary/40 text-primary gap-1.5"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 gap-1.5 shrink-0"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-primary/40 text-primary gap-1.5 shrink-0"
               onClick={() => setBulkAssignOpen(true)}
             >
               <UserPlus className="w-3.5 h-3.5" /> Assign
@@ -2377,14 +2435,14 @@ export default function LeadsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-primary/40 text-primary gap-1.5"
+              className="border-primary/40 text-primary gap-1.5 shrink-0"
               onClick={() => setBulkTagsOpen(true)}
             >
               <Tags className="w-3.5 h-3.5" /> Tag
             </Button>
             <Button
               size="sm"
-              className="bg-primary text-primary-foreground gap-1.5"
+              className="bg-primary text-primary-foreground gap-1.5 shrink-0"
               onClick={() => setBulkScheduleOpen(true)}
             >
               <Calendar className="w-3.5 h-3.5" /> Schedule
@@ -2392,7 +2450,7 @@ export default function LeadsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-border/30 text-muted-foreground gap-1.5"
+              className="border-border/30 text-muted-foreground gap-1.5 shrink-0"
               onClick={() => setContactListOpen(true)}
             >
               <Users className="w-3.5 h-3.5" /> List
@@ -2400,7 +2458,7 @@ export default function LeadsPage() {
             <Button
               size="sm"
               variant="outline"
-              className="border-violet-400/40 text-violet-400 gap-1.5"
+              className="border-violet-400/40 text-violet-400 gap-1.5 shrink-0"
               onClick={() => setEnrollSequenceOpen(true)}
             >
               <ArrowDownUp className="w-3.5 h-3.5" /> Sequence
@@ -2408,6 +2466,39 @@ export default function LeadsPage() {
           </div>
         </div>
       )}
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={open => { if (!bulkDeleting) setBulkDeleteOpen(open) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedIds.size} lead{selectedIds.size === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected lead{selectedIds.size === 1 ? "" : "s"} and cancels any scheduled emails for them. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={bulkDeleting}
+              onClick={e => {
+                e.preventDefault()
+                void handleBulkDelete()
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {bulkDeleting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  Deleting…
+                </>
+              ) : (
+                <>Delete {selectedIds.size}</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

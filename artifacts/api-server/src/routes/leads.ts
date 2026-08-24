@@ -368,6 +368,29 @@ router.patch("/leads/bulk-tags", requireOwner, async (req: Request, res: Respons
   res.json({ updated: leadIds.length });
 });
 
+// ── POST /api/leads/bulk-delete ────────────────────────────────────────────
+router.post("/leads/bulk-delete", requireOwner, async (req: Request, res: Response) => {
+  const leadIds = parseTagIds(req.body?.leadIds);
+  if (!leadIds?.length) {
+    res.status(400).json({ error: "leadIds must be a non-empty array" });
+    return;
+  }
+
+  // Cancel scheduled emails so they don't fire after deletion.
+  await db
+    .update(emailSendsTable)
+    .set({ status: "cancelled" })
+    .where(
+      and(
+        inArray(emailSendsTable.leadId, leadIds),
+        eq(emailSendsTable.status, "scheduled"),
+      ),
+    );
+
+  await db.delete(leadsTable).where(inArray(leadsTable.id, leadIds));
+  res.json({ deleted: leadIds.length });
+});
+
 // ── PATCH /api/leads/:id ───────────────────────────────────────────────────
 router.patch("/leads/:id", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
