@@ -6,7 +6,7 @@ import multer from "multer";
 import { db } from "@workspace/db";
 import { socialPostsTable, socialAccountsTable, productsTable, usersTable } from "@workspace/db/schema";
 import { eq, and, gte, lte, isNotNull, isNull } from "drizzle-orm";
-import { sendEmail } from "../lib/email";
+import { sendEmail, salesFromEmail } from "../lib/email";
 import { runMonthlyAutoGenerate } from "../lib/runMonthlyAutoGenerate";
 import { randomUUID } from "crypto";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -985,7 +985,10 @@ export async function autoGenerateMonthlySchedules(
           .select({ email: usersTable.email, name: usersTable.name })
           .from(usersTable)
           .where(eq(usersTable.role, "owner")),
-      sendNotification: sendEmail,
+      sendNotification: async (opts) => {
+        const result = await sendEmail({ ...opts, from: salesFromEmail() });
+        return result.ok ? result.id : null;
+      },
       buildEmail: buildSocialScheduleEmail,
       getBaseUrl: appUrl,
       log: logger,

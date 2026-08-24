@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import bcrypt from "bcryptjs";
 import { db, teamMembersTable, usersTable, teamInviteTokensTable } from "@workspace/db";
 import { requireOwner } from "../middlewares/requireOwner";
-import { sendEmail } from "../lib/email";
+import { sendEmail, systemFromEmail } from "../lib/email";
 import { logger } from "../lib/logger";
 import { createSession, SESSION_COOKIE, SESSION_TTL, cookieSecure } from "../lib/auth";
 import { appPublicUrl } from "../lib/appUrl";
@@ -152,8 +152,9 @@ router.post("/team/:id/invite", requireOwner, async (req, res): Promise<void> =>
   const inviteUrl = `${origin}${base}/accept-invite?token=${rawToken}`;
 
   try {
-    await sendEmail({
+    const result = await sendEmail({
       to: normalizedEmail,
+      from: systemFromEmail(),
       subject: `${req.user?.name ?? "Your team"} invited you to Sales Manager`,
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0B1220;color:#e2e8f0;border-radius:16px">
@@ -167,12 +168,28 @@ router.post("/team/:id/invite", requireOwner, async (req, res): Promise<void> =>
         </div>
       `,
     });
+    if (!result.ok) {
+      logger.error({ error: result.error, email: normalizedEmail }, "Failed to send invite email");
+      res.status(502).json({
+        error: `Invite saved but email could not be sent: ${result.error}`,
+        email: normalizedEmail,
+        expiresAt,
+        emailSent: false,
+      });
+      return;
+    }
   } catch (err) {
     logger.error({ err }, "Failed to send invite email");
-    // Don't fail the request — the token is stored, owner can resend
+    res.status(502).json({
+      error: "Invite saved but email could not be sent. Check RESEND_API_KEY and RESEND_FROM.",
+      email: normalizedEmail,
+      expiresAt,
+      emailSent: false,
+    });
+    return;
   }
 
-  res.status(201).json({ success: true, email: normalizedEmail, expiresAt });
+  res.status(201).json({ success: true, email: normalizedEmail, expiresAt, emailSent: true });
 });
 
 // ── DELETE /team/:id/invite ───────────────────────────────────────────────

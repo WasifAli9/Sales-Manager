@@ -13,7 +13,7 @@ import {
   SESSION_TTL,
   cookieSecure,
 } from '../lib/auth';
-import { sendEmail } from '../lib/email';
+import { sendEmail, systemFromEmail } from '../lib/email';
 import { logger } from '../lib/logger';
 import { appPublicUrl } from '../lib/appUrl';
 
@@ -175,8 +175,9 @@ router.post('/auth/forgot-password', async (req: Request, res: Response): Promis
   const resetUrl = `${origin}${base}/reset-password?token=${rawToken}`;
 
   try {
-    await sendEmail({
+    const result = await sendEmail({
       to: user.email,
+      from: systemFromEmail(),
       subject: 'Reset your Sales Manager password',
       html: `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0B1220;color:#e2e8f0;border-radius:16px">
@@ -187,6 +188,11 @@ router.post('/auth/forgot-password', async (req: Request, res: Response): Promis
         </div>
       `,
     });
+    if (!result.ok) {
+      // Still return success so we don't leak whether the account exists,
+      // but log the real delivery failure for ops.
+      logger.error({ error: result.error, email: user.email }, 'Password reset email was not sent');
+    }
   } catch (err) {
     logger.error({ err }, 'Failed to send password reset email');
   }

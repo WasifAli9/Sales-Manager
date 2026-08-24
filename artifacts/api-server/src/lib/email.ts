@@ -2,12 +2,42 @@ import { Resend } from "resend";
 import { logger } from "./logger";
 import { appPublicUrl } from "./appUrl";
 
-const FROM = process.env.RESEND_FROM ?? "Sales Manager <onboarding@resend.dev>";
-
 function getResend(): Resend | null {
   const key = process.env.RESEND_API_KEY?.trim();
   if (!key) return null;
   return new Resend(key);
+}
+
+/** System mail: invites, password reset, coach verdict. */
+export function systemFromEmail(): string {
+  return (
+    process.env.RESEND_FROM?.trim() ||
+    "Sales Manager <noreply@creativecloud.ai>"
+  );
+}
+
+/** Sales / outreach mail: leads, digests, targets, social notify. */
+export function salesFromEmail(): string {
+  return (
+    process.env.RESEND_FROM_SALES?.trim() ||
+    process.env.RESEND_FROM?.trim() ||
+    "Sales Manager <salesmanager@creativecloud.ai>"
+  );
+}
+
+function formatResendError(error: unknown): string {
+  if (!error) return "Unknown Resend error";
+  if (typeof error === "string") return error;
+  if (typeof error === "object") {
+    const e = error as { message?: unknown; name?: unknown; statusCode?: unknown };
+    const parts = [
+      e.name ? String(e.name) : null,
+      e.message ? String(e.message) : null,
+      e.statusCode != null ? `(${e.statusCode})` : null,
+    ].filter(Boolean);
+    if (parts.length) return parts.join(": ");
+  }
+  return String(error);
 }
 
 export interface EmailAttachment {
@@ -28,17 +58,22 @@ export interface SendEmailOptions {
   headers?: Record<string, string>;
 }
 
+export type SendEmailResult =
+  | { ok: true; id: string }
+  | { ok: false; error: string };
+
 /**
  * Send a transactional email via Resend.
- * Returns the Resend message ID on success, or null on failure.
+ * Callers that only need the message id can use `ok ? result.id : null`.
  */
-export async function sendEmail(opts: SendEmailOptions): Promise<string | null> {
+export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult> {
   const resend = getResend();
   if (!resend) {
-    logger.warn("RESEND_API_KEY is not set — skipping email send");
-    return null;
+    const error = "RESEND_API_KEY is not set — email was not sent";
+    logger.warn(error);
+    return { ok: false, error };
   }
-  const from = opts.from ?? FROM;
+  const from = opts.from ?? systemFromEmail();
   try {
     const { data, error } = await resend.emails.send({
       from,
@@ -58,15 +93,24 @@ export async function sendEmail(opts: SendEmailOptions): Promise<string | null> 
     });
 
     if (error) {
-      logger.warn({ error }, "Resend email failed");
-      return null;
+      const message = formatResendError(error);
+      logger.warn({ error, from, to: opts.to, subject: opts.subject }, "Resend email failed");
+      return { ok: false, error: message };
     }
 
-    logger.info({ to: opts.to, subject: opts.subject, id: data?.id }, "Email sent via Resend");
-    return data?.id ?? null;
+    const id = data?.id;
+    if (!id) {
+      const message = "Resend accepted the request but returned no message id";
+      logger.warn({ from, to: opts.to, subject: opts.subject }, message);
+      return { ok: false, error: message };
+    }
+
+    logger.info({ to: opts.to, subject: opts.subject, id, from }, "Email sent via Resend");
+    return { ok: true, id };
   } catch (err) {
-    logger.error({ err }, "Resend email threw");
-    return null;
+    const message = formatResendError(err);
+    logger.error({ err, from, to: opts.to, subject: opts.subject }, "Resend email threw");
+    return { ok: false, error: message };
   }
 }
 

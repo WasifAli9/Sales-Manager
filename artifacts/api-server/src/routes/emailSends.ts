@@ -4,7 +4,7 @@ import { db } from "@workspace/db";
 import { contactListsTable, emailCampaignsTable, emailSendsTable, emailSequencesTable, leadsTable, productsTable } from "@workspace/db/schema";
 import { eq, and, lte, gte, inArray, isNotNull, sql, desc, min, max } from "drizzle-orm";
 import { emailTemplatesTable } from "@workspace/db/schema";
-import { sendEmail, interpolate, type EmailAttachment } from "../lib/email";
+import { sendEmail, interpolate, salesFromEmail, type EmailAttachment } from "../lib/email";
 import { logger } from "../lib/logger";
 import { validateScheduledFor } from "../lib/validateScheduledFor";
 import { canAccessProduct } from "../lib/productAccess";
@@ -27,7 +27,7 @@ async function resolveProductConfig(leadId: number): Promise<ProductConfig> {
     .from(leadsTable).where(eq(leadsTable.id, leadId)).limit(1);
   if (!lead?.productId) {
     return {
-      from: undefined, signature: undefined, productName: undefined,
+      from: salesFromEmail(), signature: undefined, productName: undefined,
       footerText: undefined, senderLabel: undefined, supportEmail: undefined,
     };
   }
@@ -44,13 +44,13 @@ async function resolveProductConfig(leadId: number): Promise<ProductConfig> {
     .from(productsTable).where(eq(productsTable.id, lead.productId)).limit(1);
   if (!product) {
     return {
-      from: undefined, signature: undefined, productName: undefined,
+      from: salesFromEmail(), signature: undefined, productName: undefined,
       footerText: undefined, senderLabel: undefined, supportEmail: undefined,
     };
   }
   const from = product.fromEmail
     ? `${product.fromName?.trim() || product.fromEmail} <${product.fromEmail}>`
-    : undefined;
+    : salesFromEmail();
   return {
     from,
     signature: product.emailSignature ?? undefined,
@@ -273,14 +273,15 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     return;
   }
 
-  const resendId = await sendEmail({
+  const result = await sendEmail({
     to: lead.email,
     subject: resolvedSubject,
     html: wrapHtml(bodyWithControls),
     attachments,
-    from: productConfig.from,
+      from: productConfig.from,
     headers: unsubscribeHeaders(token),
   });
+  const resendId = result.ok ? result.id : null;
 
   const [updated] = await db
     .update(emailSendsTable)
@@ -288,7 +289,7 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
       status: resendId ? "sent" : "failed",
       resendId: resendId ?? null,
       sentAt: resendId ? new Date() : null,
-      errorMessage: resendId ? null : "Resend returned no ID",
+      errorMessage: resendId ? null : (result.ok ? "Resend returned no ID" : result.error),
     })
     .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")))
     .returning();
@@ -750,13 +751,14 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
         .set({ unsubscribeToken: token, body })
       .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")));
     }
-    const resendId = await sendEmail({
+    const result = await sendEmail({
       to: send.toAddress,
       subject: send.subject,
       html: wrapHtml(body),
-      from: send.fromAddress ?? undefined,
+      from: send.fromAddress ?? salesFromEmail(),
       headers: unsubscribeHeaders(token),
     });
+    const resendId = result.ok ? result.id : null;
 
     if (resendId) {
       const [sentUpdate] = await db
@@ -786,7 +788,7 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
     } else {
       const [failedUpdate] = await db
         .update(emailSendsTable)
-        .set({ status: "failed", errorMessage: "Resend returned no ID" })
+        .set({ status: "failed", errorMessage: result.ok ? "Resend returned no ID" : result.error })
         .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")))
         .returning({ id: emailSendsTable.id });
       if (failedUpdate) failed++;

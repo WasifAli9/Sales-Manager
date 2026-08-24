@@ -1,7 +1,7 @@
 import { and, between, isNotNull, lte, sql } from "drizzle-orm";
 import { db, pipelineDealsTable, productsTable, usersTable, digestLogTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { sendEmail } from "./email";
+import { sendEmail, salesFromEmail } from "./email";
 import { logger } from "./logger";
 import { appPublicUrl } from "./appUrl";
 
@@ -263,8 +263,9 @@ export async function sendPipelineDigest(): Promise<{ sent: number; skipped: str
 
   let sent = 0;
   for (const user of allUsers) {
-    await sendEmail({ to: user.email, subject, html });
-    sent++;
+    const result = await sendEmail({ to: user.email, from: salesFromEmail(), subject, html });
+    if (result.ok) sent++;
+    else logger.warn({ email: user.email, error: result.error }, "Pipeline digest email failed");
   }
 
   logger.info({ sent, dueDeals: dueDeals.length, upcoming: upcoming.length }, "Pipeline digest sent");

@@ -486,11 +486,13 @@ function TeamSection() {
         if (!res.ok) {
           const data = await res.json() as { error?: string }
           setAddError(`Member added but invite failed: ${data.error ?? "Unknown error"}`)
+          await qc.invalidateQueries({ queryKey: getListTeamMembersQueryKey() })
+          return
         }
       }
       await qc.invalidateQueries({ queryKey: getListTeamMembersQueryKey() })
       setForm({ name: "", role: "", focus: "", hoursPerWeek: "", email: "", accountRole: "member" })
-      if (!addError) setAdding(false)
+      setAdding(false)
     } finally {
       setSaving(false)
     }

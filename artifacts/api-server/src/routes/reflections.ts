@@ -9,7 +9,7 @@ import {
 import { z } from "zod";
 import { runJson } from "../lib/ai";
 import { computeFocusSplit, computePaceAlerts } from "../lib/coach";
-import { sendEmail, coachPushEmail } from "../lib/email";
+import { sendEmail, coachPushEmail, systemFromEmail } from "../lib/email";
 import { toJson } from "../lib/serialize";
 
 /** Build outreach summary lines for a given date, scoped to a user (or all for owner). */
@@ -141,6 +141,7 @@ Improvements he already sees: ${data.improvements ?? "-"}`,
     const dateLabel = data.date;
     sendEmail({
       to: req.user.email,
+      from: systemFromEmail(),
       subject: `Sales Manager — your verdict for ${dateLabel}`,
       html: coachPushEmail(coachFeedback, dateLabel),
       text: coachFeedback,
