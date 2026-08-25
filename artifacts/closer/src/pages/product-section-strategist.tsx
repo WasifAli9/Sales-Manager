@@ -2,10 +2,11 @@ import { Link, useParams } from "wouter"
 import { useProductDetail } from "@/hooks/use-products"
 import { useProductDetailData, useProductDetailMutations } from "@/hooks/use-product-detail"
 import { useProductDocumentMutations } from "@/hooks/use-product-documents"
+import { downloadDocumentExport } from "@/lib/download-document-export"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { BrainCircuit, CheckCircle2, CircleAlert, FileText, RefreshCw, Target } from "lucide-react"
+import { BrainCircuit, CheckCircle2, CircleAlert, Download, FileText, FileType2, Loader2, RefreshCw, Target } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useState } from "react"
 import { Breadcrumbs } from "@/components/breadcrumbs"
@@ -29,6 +30,7 @@ export default function ProductSectionStrategist() {
   const { createStrategyDocument } = useProductDocumentMutations(id)
   const [createdDocument, setCreatedDocument] = useState<{ id: number; name: string } | null>(null)
   const [documentError, setDocumentError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<"pdf" | "docx" | null>(null)
 
   if (prodLoad || analyses.isLoading) {
     return (
@@ -62,6 +64,19 @@ export default function ProductSectionStrategist() {
         onError: () => setDocumentError("The strategy document could not be created. Refresh the analyses and try again."),
       },
     )
+  }
+
+  const handleExport = async (format: "pdf" | "docx") => {
+    if (!createdDocument) return
+    setDocumentError(null)
+    setExporting(format)
+    try {
+      await downloadDocumentExport(id, createdDocument.id, format)
+    } catch {
+      setDocumentError(`Could not download ${format.toUpperCase()}. Open the document and try again.`)
+    } finally {
+      setExporting(null)
+    }
   }
 
   return (
@@ -128,18 +143,40 @@ export default function ProductSectionStrategist() {
         </div>
 
         {createdDocument && (
-          <div className="mt-4 flex flex-col gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-4 space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] p-3">
             <span className="flex items-center gap-2 text-xs text-emerald-200">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
               {createdDocument.name} has been saved in Documents.
             </span>
-            <Link
-              href={`/products/${id}/documents?document=${createdDocument.id}`}
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-emerald-400/30 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-400/10"
-            >
-              Open document
-              <FileText className="h-3.5 w-3.5" />
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/products/${id}/documents?document=${createdDocument.id}`}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-emerald-400/30 px-3 text-xs font-medium text-emerald-200 hover:bg-emerald-400/10"
+              >
+                Open document
+                <FileText className="h-3.5 w-3.5" />
+              </Link>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 border-emerald-400/30 text-emerald-200 hover:bg-emerald-400/10"
+                disabled={!!exporting}
+                onClick={() => void handleExport("pdf")}
+              >
+                {exporting === "pdf" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                PDF
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 border-emerald-400/30 text-emerald-200 hover:bg-emerald-400/10"
+                disabled={!!exporting}
+                onClick={() => void handleExport("docx")}
+              >
+                {exporting === "docx" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileType2 className="h-3.5 w-3.5" />}
+                DOCX
+              </Button>
+            </div>
           </div>
         )}
 

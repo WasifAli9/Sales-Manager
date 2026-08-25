@@ -49,7 +49,8 @@ describe("buildStrategyDocument", () => {
     assert.match(document, /# Sales Strategy Document/);
     assert.match(document, /## Product Context/);
     assert.match(document, /## Ideal Customer Profile/);
-    assert.match(document, /\*\*Persona:\*\* Founder-led SaaS operator/);
+    assert.match(document, /### Persona/);
+    assert.match(document, /Founder-led SaaS operator/);
     assert.match(document, /## Competitive Landscape/);
     assert.match(document, /## Value Proposition and Offer/);
     assert.match(document, /## Go-to-Market Plan/);

@@ -81,42 +81,84 @@ function parseContent(content: unknown): unknown {
   }
 }
 
-function renderValue(value: unknown, indent = ""): string[] {
+function escapeInline(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim();
+}
+
+function renderListItem(text: string, indent = ""): string {
+  return `${indent}- ${escapeInline(text)}`;
+}
+
+function renderNestedValue(value: unknown, indent = ""): string[] {
   if (value == null) return [];
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return [`${indent}${String(value)}`];
+    return [renderListItem(String(value), indent)];
   }
   if (Array.isArray(value)) {
     return value.flatMap((item) => {
       if (item && typeof item === "object" && !Array.isArray(item)) {
-        return renderObject(item as Record<string, unknown>, `${indent}  `).map((line, index) =>
-          index === 0 ? `${indent}- ${line.trimStart()}` : line,
-        );
+        const entries = Object.entries(item as Record<string, unknown>).filter(([, v]) => v != null);
+        if (!entries.length) return [];
+        const [firstKey, firstVal] = entries[0]!;
+        const title =
+          typeof firstVal === "string" || typeof firstVal === "number"
+            ? String(firstVal)
+            : humanize(firstKey);
+        const rest = entries.slice(1).flatMap(([key, nested]) => {
+          if (typeof nested === "string" || typeof nested === "number" || typeof nested === "boolean") {
+            return [`${indent}  - **${humanize(key)}:** ${escapeInline(String(nested))}`];
+          }
+          return [
+            `${indent}  - **${humanize(key)}:**`,
+            ...renderNestedValue(nested, `${indent}    `),
+          ];
+        });
+        return [`${indent}- **${escapeInline(title)}**`, ...rest];
       }
-      const lines = renderValue(item, `${indent}  `);
-      return lines.length ? [`${indent}- ${lines[0].trimStart()}`, ...lines.slice(1)] : [];
+      return renderNestedValue(item, indent);
     });
   }
-  if (typeof value === "object") return renderObject(value as Record<string, unknown>, indent);
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, nested]) => {
+      if (nested == null) return [];
+      if (typeof nested === "string" || typeof nested === "number" || typeof nested === "boolean") {
+        return [`${indent}- **${humanize(key)}:** ${escapeInline(String(nested))}`];
+      }
+      return [`${indent}- **${humanize(key)}:**`, ...renderNestedValue(nested, `${indent}  `)];
+    });
+  }
   return [];
 }
 
-function renderObject(value: Record<string, unknown>, indent = ""): string[] {
-  return Object.entries(value).flatMap(([key, nested]) => {
-    if (nested == null) return [];
-    if (typeof nested === "string" || typeof nested === "number" || typeof nested === "boolean") {
-      return [`${indent}- **${humanize(key)}:** ${String(nested)}`];
-    }
-    const children = renderValue(nested, `${indent}  `);
-    return [`${indent}- **${humanize(key)}:**`, ...children];
-  });
+function renderTopLevelField(key: string, value: unknown): string[] {
+  const title = humanize(key);
+  if (value == null) return [];
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [`### ${title}`, "", escapeInline(String(value)), ""];
+  }
+  if (Array.isArray(value) && value.every((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean")) {
+    return [
+      `### ${title}`,
+      "",
+      ...value.map((item) => renderListItem(String(item))),
+      "",
+    ];
+  }
+  return [`### ${title}`, "", ...renderNestedValue(value), ""];
 }
 
 function renderAnalysis(content: unknown): string {
   const parsed = parseContent(content);
-  if (typeof parsed === "string") return parsed.trim() || "No detail was generated.";
-  const lines = renderValue(parsed);
-  return lines.length ? lines.join("\n") : "No detail was generated.";
+  if (typeof parsed === "string") return escapeInline(parsed) || "No detail was generated.";
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    const lines = renderNestedValue(parsed);
+    return lines.length ? lines.join("\n") : "No detail was generated.";
+  }
+
+  const lines = Object.entries(parsed as Record<string, unknown>).flatMap(([key, value]) =>
+    renderTopLevelField(key, value),
+  );
+  return lines.length ? lines.join("\n").trim() : "No detail was generated.";
 }
 
 export function buildStrategyDocument(
@@ -124,28 +166,54 @@ export function buildStrategyDocument(
   analyses: StrategyAnalysis[],
 ): string {
   const byKind = selectLatestStrategistAnalyses(analyses);
+  const generatedAt = new Date().toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 
   const productContext = [
-    `- **Product:** ${product.name}`,
-    product.tagline ? `- **Tagline:** ${product.tagline}` : null,
-    product.description ? `- **Description:** ${product.description}` : null,
-    product.targetMarket ? `- **Target Market:** ${product.targetMarket}` : null,
-    product.websiteUrl ? `- **Website:** ${product.websiteUrl}` : null,
+    `| Field | Detail |`,
+    `| --- | --- |`,
+    `| Product | ${product.name} |`,
+    product.tagline ? `| Tagline | ${product.tagline} |` : null,
+    product.description ? `| Description | ${product.description} |` : null,
+    product.targetMarket ? `| Target Market | ${product.targetMarket} |` : null,
+    product.websiteUrl ? `| Website | ${product.websiteUrl} |` : null,
   ].filter((line): line is string => Boolean(line));
 
   const sections = STRATEGIST_ANALYSIS_KINDS.map((kind) => {
     const analysis = byKind.get(kind);
     const verificationNote = analysis?.grounded === false
-      ? "\n\n> Note: This analysis was generated without supplied grounding research. Verify factual claims before using them externally."
+      ? "\n\n> **Note:** This analysis was generated without supplied grounding research. Verify factual claims before using them externally."
       : "";
-    return `## ${ANALYSIS_TITLES[kind]}\n\n${renderAnalysis(analysis?.content)}${verificationNote}`;
+    return [
+      `## ${ANALYSIS_TITLES[kind]}`,
+      "",
+      renderAnalysis(analysis?.content),
+      verificationNote,
+    ].join("\n").trim();
   });
 
   return [
-    "# Sales Strategy Document",
+    `# Sales Strategy Document`,
+    "",
+    `**${product.name}**`,
+    "",
+    `Generated ${generatedAt} from The Strategist analyses.`,
+    "",
     "This document combines the completed Strategist analyses into one working sales strategy.",
+    "",
+    "---",
+    "",
     "## Product Context",
+    "",
     productContext.join("\n"),
-    ...sections,
-  ].join("\n\n");
+    "",
+    "---",
+    "",
+    ...sections.flatMap((section, index) =>
+      index === sections.length - 1 ? [section, ""] : [section, "", "---", ""],
+    ),
+  ].join("\n").trim() + "\n";
 }

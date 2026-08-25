@@ -16,6 +16,11 @@ import {
   buildStrategyDocument,
   getMissingStrategistAnalyses,
 } from "../lib/strategyDocument";
+import {
+  strategyExportFilename,
+  strategyMarkdownToDocx,
+  strategyMarkdownToPdf,
+} from "../lib/strategyDocumentExport";
 
 const router = Router();
 
@@ -82,15 +87,75 @@ router.post("/products/:id/strategy-document", async (req, res): Promise<void> =
     .insert(productDocumentsTable)
     .values({
       productId,
-      name: "Strategist Sales Strategy",
+      name: `${product.name} — Sales Strategy`,
       textContent,
       storageKey: null,
-      mimeType: "text/plain",
+      mimeType: "text/markdown",
       fileSizeBytes: Buffer.byteLength(textContent, "utf8"),
     })
     .returning();
 
   res.status(201).json(CreateProductStrategyDocumentResponse.parse(toJson(document)));
+});
+
+router.get("/products/:productId/documents/:docId/export", async (req, res): Promise<void> => {
+  const productId = parseInt(String(req.params.productId), 10);
+  const docId = parseInt(String(req.params.docId), 10);
+  const format = String(req.query.format ?? "").toLowerCase();
+  if (isNaN(productId) || isNaN(docId)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  if (format !== "pdf" && format !== "docx") {
+    res.status(400).json({ error: "format must be pdf or docx" });
+    return;
+  }
+  if (!(await requireProductAccess(req, res, productId))) return;
+
+  const [document] = await db
+    .select()
+    .from(productDocumentsTable)
+    .where(and(eq(productDocumentsTable.id, docId), eq(productDocumentsTable.productId, productId)))
+    .limit(1);
+
+  if (!document) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+  if (!document.textContent?.trim()) {
+    res.status(400).json({ error: "This document has no text content to export" });
+    return;
+  }
+
+  const [product] = await db
+    .select({ name: productsTable.name })
+    .from(productsTable)
+    .where(eq(productsTable.id, productId))
+    .limit(1);
+
+  const title = document.name || `${product?.name ?? "Product"} Sales Strategy`;
+  const filename = strategyExportFilename(product?.name ?? document.name, format);
+
+  try {
+    if (format === "pdf") {
+      const buffer = await strategyMarkdownToPdf(document.textContent, title);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(buffer);
+      return;
+    }
+
+    const buffer = await strategyMarkdownToDocx(document.textContent, title);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (err) {
+    req.log.error({ err, docId, format }, "Strategy document export failed");
+    res.status(500).json({ error: "Failed to export document" });
+  }
 });
 
 router.get("/products/:id/documents", async (req, res): Promise<void> => {

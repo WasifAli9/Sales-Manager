@@ -1,4 +1,4 @@
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useProductDocuments, useProductDocumentMutations } from "@/hooks/use-product-documents"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,8 +12,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import {
-  FileText, Upload, Trash2, Plus, File, Loader2, AlignLeft, ExternalLink
+  FileText, Upload, Trash2, Plus, File, Loader2, AlignLeft, ExternalLink, Download, FileType2
 } from "lucide-react"
+import ReactMarkdown from "react-markdown"
+import { downloadDocumentExport } from "@/lib/download-document-export"
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
@@ -26,9 +28,17 @@ function formatBytes(bytes: number): string {
 function DocIcon({ mimeType }: { mimeType?: string | null }) {
   const t = mimeType ?? ""
   if (t.includes("pdf")) return <FileText className="w-4 h-4 text-red-400 shrink-0" />
-  if (t.includes("word") || t.includes("document")) return <FileText className="w-4 h-4 text-blue-400 shrink-0" />
+  if (t.includes("word") || t.includes("document") || t.includes("markdown")) return <FileText className="w-4 h-4 text-blue-400 shrink-0" />
   if (t.startsWith("text/")) return <AlignLeft className="w-4 h-4 text-muted-foreground shrink-0" />
   return <File className="w-4 h-4 text-muted-foreground shrink-0" />
+}
+
+function isMarkdownDoc(doc: { mimeType?: string | null; name?: string; textContent?: string | null }) {
+  const mime = doc.mimeType ?? ""
+  if (mime.includes("markdown")) return true
+  if (doc.name?.toLowerCase().includes("sales strategy")) return true
+  const text = doc.textContent ?? ""
+  return text.includes("# Sales Strategy Document") || /^#\s/m.test(text)
 }
 
 interface Props {
@@ -73,7 +83,6 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
     setUploading(true)
     setUploadError(null)
     try {
-      // 1. Request presigned URL
       const urlRes = await fetch(`${BASE}/api/storage/uploads/request-url`, {
         method: "POST",
         credentials: "include",
@@ -87,7 +96,6 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
       if (!urlRes.ok) throw new Error("Failed to get upload URL")
       const { uploadURL, objectPath } = (await urlRes.json()) as { uploadURL: string; objectPath: string }
 
-      // 2. Upload to GCS
       const putRes = await fetch(uploadURL, {
         method: "PUT",
         body: selectedFile,
@@ -95,7 +103,6 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
       })
       if (!putRes.ok) throw new Error("Upload failed")
 
-      // 3. Record in DB
       create.mutate(
         {
           id: productId,
@@ -145,7 +152,6 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
               <DialogTitle>Add Document</DialogTitle>
             </DialogHeader>
 
-            {/* Mode toggle */}
             <div className="flex gap-2 shrink-0">
               <button
                 onClick={() => setMode("text")}
@@ -274,7 +280,7 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
                     {new Date(doc.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 shrink-0">
                   {doc.storageKey && (
                     <Button
                       variant="ghost"
@@ -293,7 +299,11 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
                     </Button>
                   )}
                   {doc.textContent && (
-                    <ViewTextDocButton doc={doc} openOnMount={doc.id === initialOpenDocumentId} />
+                    <ViewTextDocButton
+                      productId={productId}
+                      doc={doc}
+                      openOnMount={doc.id === initialOpenDocumentId}
+                    />
                   )}
                   <Button
                     variant="ghost"
@@ -315,13 +325,35 @@ export function ProductDocuments({ productId, initialOpenDocumentId }: Props) {
 }
 
 function ViewTextDocButton({
+  productId,
   doc,
   openOnMount = false,
 }: {
-  doc: { id: number; name: string; textContent?: string | null }
+  productId: number
+  doc: { id: number; name: string; textContent?: string | null; mimeType?: string | null }
   openOnMount?: boolean
 }) {
   const [open, setOpen] = useState(openOnMount)
+  const [exporting, setExporting] = useState<"pdf" | "docx" | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const markdown = isMarkdownDoc(doc)
+
+  useEffect(() => {
+    if (openOnMount) setOpen(true)
+  }, [openOnMount])
+
+  const handleExport = async (format: "pdf" | "docx") => {
+    setExportError(null)
+    setExporting(format)
+    try {
+      await downloadDocumentExport(productId, doc.id, format)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Download failed")
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -329,14 +361,46 @@ function ViewTextDocButton({
           <AlignLeft className="w-3.5 h-3.5" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[80dvh] flex flex-col overflow-hidden">
-        <DialogHeader className="shrink-0">
-          <DialogTitle className="truncate">{doc.name}</DialogTitle>
+      <DialogContent className="max-h-[85dvh] max-w-2xl flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0 space-y-3">
+          <DialogTitle className="truncate pr-6">{doc.name}</DialogTitle>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={!!exporting}
+              onClick={() => void handleExport("pdf")}
+            >
+              {exporting === "pdf" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              PDF
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={!!exporting}
+              onClick={() => void handleExport("docx")}
+            >
+              {exporting === "docx" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileType2 className="w-3.5 h-3.5" />}
+              DOCX
+            </Button>
+          </div>
+          {exportError && <p className="text-xs text-destructive">{exportError}</p>}
         </DialogHeader>
-        <div className="flex-1 overflow-y-auto text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-          {doc.textContent}
+        <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+          {markdown ? (
+            <div className="prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground/85 prose-strong:text-foreground prose-li:text-foreground/85 prose-hr:border-border">
+              <ReactMarkdown>{doc.textContent ?? ""}</ReactMarkdown>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+              {doc.textContent}
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
   )
 }
+

@@ -396,7 +396,9 @@ function NorthStarTile({ item, onClick }: { item: VisionItem; onClick: () => voi
           <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-primary/60 mb-1">North Star</p>
           <p className="text-sm font-bold text-foreground leading-snug">{item.title}</p>
           {item.description && (
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">{item.description}</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed whitespace-pre-wrap">
+              {item.description}
+            </p>
           )}
         </div>
         <Pencil className="w-3.5 h-3.5 text-muted-foreground/40 shrink-0 mt-1" />
