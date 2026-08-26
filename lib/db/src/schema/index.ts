@@ -27,3 +27,4 @@ export * from "./teamInviteTokens";
 export * from "./productAssets";
 export * from "./contactLists";
 export * from "./emailCampaigns";
+export * from "./userProductEmailSettings";

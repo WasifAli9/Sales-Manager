@@ -34,6 +34,7 @@ import socialAuthRouter from "./socialAuth";
 import productAssetsRouter from "./productAssets";
 import contactListsRouter from "./contactLists";
 import unsubscribeRouter from "./unsubscribe";
+import userProductEmailSettingsRouter from "./userProductEmailSettings";
 
 const router: IRouter = Router();
 
@@ -72,5 +73,6 @@ router.use(socialAuthRouter);
 router.use(productAssetsRouter);
 router.use(contactListsRouter);
 router.use(unsubscribeRouter);
+router.use(userProductEmailSettingsRouter);
 
 export default router;

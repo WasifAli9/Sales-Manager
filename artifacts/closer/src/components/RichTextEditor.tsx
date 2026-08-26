@@ -12,6 +12,7 @@ import { FontSize, Color } from "@tiptap/extension-text-style"
 import { Placeholder } from "@tiptap/extension-placeholder"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { cn } from "@/lib/utils"
+import { emailBodyToHtml } from "@/lib/email-body"
 import {
   Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon,
   List, ListOrdered, Image as ImageIcon, Type, X, Upload,
@@ -200,7 +201,7 @@ export function RichTextEditor({
       Color,
       Placeholder.configure({ placeholder }),
     ],
-    content: value || "",
+    content: emailBodyToHtml(value || ""),
     onUpdate: ({ editor }) => {
       isInternalChange.current = true
       const html = editor.getHTML()
@@ -208,19 +209,19 @@ export function RichTextEditor({
     },
     editorProps: {
       attributes: {
-        class: "outline-none prose prose-invert prose-sm max-w-none px-3 py-2.5 text-sm text-foreground leading-relaxed",
+        class: "outline-none prose prose-invert prose-sm max-w-none px-3 py-2.5 text-sm text-foreground leading-relaxed [&_p]:my-2 [&_p]:first:mt-0 [&_p]:last:mb-0",
       },
     },
   })
 
-  // Sync external value changes (e.g. template applied)
+  // Sync external value changes (e.g. template applied / AI-generated plain text)
   useEffect(() => {
     if (!editor) return
     if (isInternalChange.current) {
       isInternalChange.current = false
       return
     }
-    const normalised = value || ""
+    const normalised = emailBodyToHtml(value || "")
     if (editor.getHTML() !== normalised) {
       editor.commands.setContent(normalised)
     }

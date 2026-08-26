@@ -15,14 +15,60 @@ import { useAuth } from "@/hooks/use-auth"
 import { Breadcrumbs } from "@/components/breadcrumbs"
 import { RichTextEditor } from "@/components/RichTextEditor"
 import { useToast } from "@/hooks/use-toast"
+import { emailBodyToHtml } from "@/lib/email-body"
+
+const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
+
+type MyEmailSettings = {
+  fromName: string | null
+  fromEmail: string | null
+  emailSignature: string | null
+  unsubscribeFooterText: string | null
+  unsubscribeSenderLabel: string | null
+  unsubscribeSupportEmail: string | null
+}
+
+const emptyMySettings = (): MyEmailSettings => ({
+  fromName: null,
+  fromEmail: null,
+  emailSignature: null,
+  unsubscribeFooterText: null,
+  unsubscribeSenderLabel: null,
+  unsubscribeSupportEmail: null,
+})
+
+async function fetchMyEmailSettings(productId: number): Promise<MyEmailSettings> {
+  const res = await fetch(`${BASE}/api/products/${productId}/my-email-settings`, { credentials: "include" })
+  if (!res.ok) throw new Error("Could not load your email settings")
+  return res.json()
+}
+
+async function saveMyEmailSettings(productId: number, data: Partial<MyEmailSettings>): Promise<MyEmailSettings> {
+  const res = await fetch(`${BASE}/api/products/${productId}/my-email-settings`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(result.error || "Could not save your email settings")
+  return result
+}
 
 export default function ProductSectionEmail() {
   const params = useParams()
   const id = Number(params.id)
+  const { user } = useAuth()
+  const isOwner = user?.role === "owner"
   const { data: product, isLoading: prodLoad } = useProductDetail(id)
   const { platformStates } = useProductDetailData(id)
+  const mySettingsQuery = useQuery({
+    queryKey: ["my-email-settings", id],
+    queryFn: () => fetchMyEmailSettings(id),
+    enabled: Number.isInteger(id) && id > 0 && !!user && !isOwner,
+  })
 
-  if (prodLoad || platformStates.isLoading) {
+  if (prodLoad || platformStates.isLoading || (!isOwner && mySettingsQuery.isLoading)) {
     return (
       <div className="p-4 space-y-4 animate-pulse">
         <div className="h-4 w-56 bg-muted rounded" />
@@ -34,9 +80,10 @@ export default function ProductSectionEmail() {
 
   if (!product) return <div className="p-4 text-muted-foreground">Product not found</div>
 
+  const mySettings = mySettingsQuery.data ?? emptyMySettings()
+
   return (
     <div className="flex-1 flex flex-col pt-4 pb-24 lg:pb-10 space-y-6 px-4">
-      {/* Breadcrumbs */}
       <Breadcrumbs
         items={[
           { label: "Portfolio", href: "/products" },
@@ -45,27 +92,22 @@ export default function ProductSectionEmail() {
         ]}
       />
 
-      {/* Header */}
       <div>
         <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
           <Mail className="w-5 h-5 text-orange-400" />
           Email Settings
         </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Configure the sender identity, signature, and required unsubscribe footer for this product's outbound emails.
+          {isOwner
+            ? "Configure the product default sender identity, signature, and unsubscribe footer for outbound emails."
+            : "Set up your own sender identity, signature, and unsubscribe footer for emails you send from this product."}
         </p>
       </div>
 
-      {/* Email Identity */}
-      <EmailIdentitySection product={product} productId={id} />
+      <EmailIdentitySection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
+      <EmailSignatureSection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
+      <UnsubscribeFooterSection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
 
-      {/* Email Signature */}
-      <EmailSignatureSection product={product} productId={id} />
-
-       {/* Unsubscribe footer */}
-       <UnsubscribeFooterSection product={product} productId={id} />
-
-      {/* Platform Readiness */}
       {platformStates.data && platformStates.data.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
@@ -123,7 +165,6 @@ interface LeadTagOption {
   leadCount: number
 }
 
-const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 const MERGE_FIELDS = ["{{firstName}}", "{{lastName}}", "{{company}}", "{{title}}", "{{email}}"]
 
 function blankStep(delayDays = 0): SequenceStepDraft {
@@ -295,7 +336,14 @@ export function ProductSequenceWorkspace({
       })
       const result = await res.json()
       if (!res.ok) throw new Error(result.error || "Could not generate a sequence")
-      setDraft({ name: result.name, description: result.description ?? "", steps: result.steps })
+      setDraft({
+        name: result.name,
+        description: result.description ?? "",
+        steps: (result.steps as SequenceDraft["steps"]).map(step => ({
+          ...step,
+          body: emailBodyToHtml(step.body),
+        })),
+      })
       setGenerationProgress(100)
       setGenerationPhase(`Preview ready — ${result.steps.length} email${result.steps.length === 1 ? "" : "s"} to review`)
       setGenerationCompleteVisible(true)
@@ -377,7 +425,7 @@ export function ProductSequenceWorkspace({
         sequenceId: sequence.id,
         name: sequence.name,
         description: sequence.description ?? "",
-        steps: steps.map(step => ({ name: step.name ?? "", delayDays: step.delayDays, subject: step.subject, body: step.body })),
+        steps: steps.map(step => ({ name: step.name ?? "", delayDays: step.delayDays, subject: step.subject, body: emailBodyToHtml(step.body) })),
       })
       setCampaignName(`${sequence.name} launch`)
     } catch {
@@ -630,15 +678,26 @@ export function ProductSequenceWorkspace({
 }
 
 // ── Email Identity Section ─────────────────────────────────────────────────────
-function EmailIdentitySection({ product, productId }: { product: any; productId: number }) {
-  const { user } = useAuth()
-  const isOwner = user?.role === "owner"
+function EmailIdentitySection({
+  product,
+  productId,
+  isOwner,
+  mySettings,
+}: {
+  product: any
+  productId: number
+  isOwner: boolean
+  mySettings: MyEmailSettings
+}) {
   const qc = useQueryClient()
   const updateProduct = useUpdateProduct()
 
+  const currentFromName = isOwner ? (product.fromName ?? "") : (mySettings.fromName ?? "")
+  const currentFromEmail = isOwner ? (product.fromEmail ?? "") : (mySettings.fromEmail ?? "")
+
   const [editing, setEditing] = useState(false)
-  const [fromName, setFromName] = useState(product.fromName ?? "")
-  const [fromEmail, setFromEmail] = useState(product.fromEmail ?? "")
+  const [fromName, setFromName] = useState(currentFromName)
+  const [fromEmail, setFromEmail] = useState(currentFromEmail)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -647,8 +706,8 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
     : null
 
   const handleEdit = () => {
-    setFromName(product.fromName ?? "")
-    setFromEmail(product.fromEmail ?? "")
+    setFromName(isOwner ? (product.fromName ?? "") : (mySettings.fromName ?? ""))
+    setFromEmail(isOwner ? (product.fromEmail ?? "") : (mySettings.fromEmail ?? ""))
     setError(null)
     setEditing(true)
   }
@@ -661,14 +720,22 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
     setSaving(true)
     setError(null)
     try {
-      await updateProduct.mutateAsync({
-        id: productId,
-        data: { fromName: fromName.trim() || undefined, fromEmail: fromEmail.trim() || undefined } as any,
-      })
-      await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      if (isOwner) {
+        await updateProduct.mutateAsync({
+          id: productId,
+          data: { fromName: fromName.trim() || undefined, fromEmail: fromEmail.trim() || undefined } as any,
+        })
+        await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      } else {
+        await saveMyEmailSettings(productId, {
+          fromName: fromName.trim() || null,
+          fromEmail: fromEmail.trim() || null,
+        })
+        await qc.invalidateQueries({ queryKey: ["my-email-settings", productId] })
+      }
       setEditing(false)
-    } catch {
-      setError("Failed to save — please try again")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save — please try again")
     } finally {
       setSaving(false)
     }
@@ -677,8 +744,13 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
   const handleClear = async () => {
     setSaving(true)
     try {
-      await updateProduct.mutateAsync({ id: productId, data: { fromName: null, fromEmail: null } as any })
-      await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      if (isOwner) {
+        await updateProduct.mutateAsync({ id: productId, data: { fromName: null, fromEmail: null } as any })
+        await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      } else {
+        await saveMyEmailSettings(productId, { fromName: null, fromEmail: null })
+        await qc.invalidateQueries({ queryKey: ["my-email-settings", productId] })
+      }
       setEditing(false)
       setFromName("")
       setFromEmail("")
@@ -689,19 +761,22 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
     }
   }
 
+  const displayFromName = isOwner ? product.fromName : mySettings.fromName
+  const displayFromEmail = isOwner ? product.fromEmail : mySettings.fromEmail
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
           Email Identity
         </h2>
-        {isOwner && !editing && (
+        {!editing && (
           <Button
             variant="ghost" size="sm"
             onClick={handleEdit}
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
           >
-            <Pencil className="w-3 h-3" /> Edit
+            <Pencil className="w-3 h-3" /> {displayFromEmail ? "Edit" : "Set up"}
           </Button>
         )}
       </div>
@@ -748,7 +823,7 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
           {error && <p className="text-xs text-destructive">{error}</p>}
 
           <div className="flex gap-2 pt-1">
-            {product.fromEmail && (
+            {displayFromEmail && (
               <Button
                 variant="ghost" size="sm"
                 onClick={handleClear}
@@ -770,21 +845,27 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-card px-4 py-3 space-y-1.5">
-          {product.fromEmail ? (
+          {displayFromEmail ? (
             <>
-              <p className="text-xs text-muted-foreground">Emails sent for this product come from:</p>
+              <p className="text-xs text-muted-foreground">
+                {isOwner ? "Emails sent for this product come from:" : "Your emails for this product come from:"}
+              </p>
               <p className="text-sm font-medium text-foreground">
-                {product.fromName ? `${product.fromName} ` : ""}
-                <span className="text-primary">&lt;{product.fromEmail}&gt;</span>
+                {displayFromName ? `${displayFromName} ` : ""}
+                <span className="text-primary">&lt;{displayFromEmail}&gt;</span>
               </p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground italic">
-              Using workspace default — set a sender email to brand outbound mail for this product.
+              {isOwner
+                ? "Using workspace default — set a sender email to brand outbound mail for this product."
+                : "You haven’t set a sender yet — set one up so your outreach doesn’t use someone else’s address."}
             </p>
           )}
           <p className="text-[11px] text-muted-foreground/60 pt-0.5">
-            Team members assigned to this product send from this address.
+            {isOwner
+              ? "This is the product default. Team members can set their own sender in Email Settings."
+              : "These settings are yours only — they don’t change the product owner’s defaults."}
           </p>
         </div>
       )}
@@ -793,19 +874,28 @@ function EmailIdentitySection({ product, productId }: { product: any; productId:
 }
 
 // ── Email Signature Section ────────────────────────────────────────────────────
-function EmailSignatureSection({ product, productId }: { product: any; productId: number }) {
-  const { user } = useAuth()
-  const isOwner = user?.role === "owner"
+function EmailSignatureSection({
+  product,
+  productId,
+  isOwner,
+  mySettings,
+}: {
+  product: any
+  productId: number
+  isOwner: boolean
+  mySettings: MyEmailSettings
+}) {
   const qc = useQueryClient()
   const updateProduct = useUpdateProduct()
+  const displaySignature = isOwner ? product.emailSignature : mySettings.emailSignature
 
   const [editing, setEditing] = useState(false)
-  const [signature, setSignature] = useState(product.emailSignature ?? "")
+  const [signature, setSignature] = useState(displaySignature ?? "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleEdit = () => {
-    setSignature(product.emailSignature ?? "")
+    setSignature((isOwner ? product.emailSignature : mySettings.emailSignature) ?? "")
     setError(null)
     setEditing(true)
   }
@@ -814,14 +904,19 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
     setSaving(true)
     setError(null)
     try {
-      await updateProduct.mutateAsync({
-        id: productId,
-        data: { emailSignature: signature.trim() || null } as any,
-      })
-      await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      if (isOwner) {
+        await updateProduct.mutateAsync({
+          id: productId,
+          data: { emailSignature: signature.trim() || null } as any,
+        })
+        await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      } else {
+        await saveMyEmailSettings(productId, { emailSignature: signature.trim() || null })
+        await qc.invalidateQueries({ queryKey: ["my-email-settings", productId] })
+      }
       setEditing(false)
-    } catch {
-      setError("Failed to save — please try again")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save — please try again")
     } finally {
       setSaving(false)
     }
@@ -830,8 +925,13 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
   const handleClear = async () => {
     setSaving(true)
     try {
-      await updateProduct.mutateAsync({ id: productId, data: { emailSignature: null } as any })
-      await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      if (isOwner) {
+        await updateProduct.mutateAsync({ id: productId, data: { emailSignature: null } as any })
+        await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      } else {
+        await saveMyEmailSettings(productId, { emailSignature: null })
+        await qc.invalidateQueries({ queryKey: ["my-email-settings", productId] })
+      }
       setSignature("")
       setEditing(false)
     } catch {
@@ -847,14 +947,14 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
         <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
           Email Signature
         </h2>
-        {isOwner && !editing && (
+        {!editing && (
           <Button
             variant="ghost" size="sm"
             onClick={handleEdit}
             className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
           >
             <Pencil className="w-3 h-3" />
-            {product.emailSignature ? "Edit" : "Set up"}
+            {displaySignature ? "Edit" : "Set up"}
           </Button>
         )}
       </div>
@@ -871,7 +971,7 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
               className="rounded-xl text-sm resize-none bg-muted/40 border-border/30"
             />
             <p className="text-[11px] text-muted-foreground">
-              Plain text only. Appended after a <span className="font-mono">--</span> separator on every email sent for this product.
+              Plain text only. Appended after a <span className="font-mono">--</span> separator on emails you send.
             </p>
           </div>
 
@@ -887,7 +987,7 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
           {error && <p className="text-xs text-destructive">{error}</p>}
 
           <div className="flex gap-2 pt-1">
-            {product.emailSignature && (
+            {displaySignature && (
               <Button
                 variant="ghost" size="sm"
                 onClick={handleClear}
@@ -909,9 +1009,9 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
         </div>
       ) : (
         <div className="rounded-2xl border border-border bg-card px-4 py-3">
-          {product.emailSignature ? (
+          {displaySignature ? (
             <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed">
-              {product.emailSignature}
+              {displaySignature}
             </pre>
           ) : (
             <p className="text-xs text-muted-foreground italic">
@@ -925,22 +1025,33 @@ function EmailSignatureSection({ product, productId }: { product: any; productId
 }
 
 // ── Required unsubscribe footer ───────────────────────────────────────────────
-function UnsubscribeFooterSection({ product, productId }: { product: any; productId: number }) {
-  const { user } = useAuth()
-  const isOwner = user?.role === "owner"
+function UnsubscribeFooterSection({
+  product,
+  productId,
+  isOwner,
+  mySettings,
+}: {
+  product: any
+  productId: number
+  isOwner: boolean
+  mySettings: MyEmailSettings
+}) {
   const qc = useQueryClient()
   const updateProduct = useUpdateProduct()
   const [editing, setEditing] = useState(false)
-  const [footerText, setFooterText] = useState(product.unsubscribeFooterText ?? "")
-  const [senderLabel, setSenderLabel] = useState(product.unsubscribeSenderLabel ?? "")
-  const [supportEmail, setSupportEmail] = useState(product.unsubscribeSupportEmail ?? "")
+  const storedFooter = isOwner ? product.unsubscribeFooterText : mySettings.unsubscribeFooterText
+  const storedSender = isOwner ? product.unsubscribeSenderLabel : mySettings.unsubscribeSenderLabel
+  const storedSupport = isOwner ? product.unsubscribeSupportEmail : mySettings.unsubscribeSupportEmail
+  const [footerText, setFooterText] = useState(storedFooter ?? "")
+  const [senderLabel, setSenderLabel] = useState(storedSender ?? "")
+  const [supportEmail, setSupportEmail] = useState(storedSupport ?? "")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const reset = () => {
-    setFooterText(product.unsubscribeFooterText ?? "")
-    setSenderLabel(product.unsubscribeSenderLabel ?? "")
-    setSupportEmail(product.unsubscribeSupportEmail ?? "")
+    setFooterText((isOwner ? product.unsubscribeFooterText : mySettings.unsubscribeFooterText) ?? "")
+    setSenderLabel((isOwner ? product.unsubscribeSenderLabel : mySettings.unsubscribeSenderLabel) ?? "")
+    setSupportEmail((isOwner ? product.unsubscribeSupportEmail : mySettings.unsubscribeSupportEmail) ?? "")
     setError(null)
   }
 
@@ -952,26 +1063,29 @@ function UnsubscribeFooterSection({ product, productId }: { product: any; produc
     setSaving(true)
     setError(null)
     try {
-      await updateProduct.mutateAsync({
-        id: productId,
-        data: {
-          unsubscribeFooterText: footerText.trim() || null,
-          unsubscribeSenderLabel: senderLabel.trim() || null,
-          unsubscribeSupportEmail: supportEmail.trim() || null,
-        },
-      })
-      await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      const payload = {
+        unsubscribeFooterText: footerText.trim() || null,
+        unsubscribeSenderLabel: senderLabel.trim() || null,
+        unsubscribeSupportEmail: supportEmail.trim() || null,
+      }
+      if (isOwner) {
+        await updateProduct.mutateAsync({ id: productId, data: payload as any })
+        await qc.invalidateQueries({ queryKey: getGetProductQueryKey(productId) })
+      } else {
+        await saveMyEmailSettings(productId, payload)
+        await qc.invalidateQueries({ queryKey: ["my-email-settings", productId] })
+      }
       setEditing(false)
-    } catch {
-      setError("Failed to save — please try again")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save — please try again")
     } finally {
       setSaving(false)
     }
   }
 
-  const resolvedSender = senderLabel.trim() || product.unsubscribeSenderLabel || product.name || "our team"
-  const resolvedText = footerText.trim() || product.unsubscribeFooterText || `You are receiving this email from ${resolvedSender}.`
-  const resolvedSupport = supportEmail.trim() || product.unsubscribeSupportEmail
+  const resolvedSender = senderLabel.trim() || storedSender || product.name || "our team"
+  const resolvedText = footerText.trim() || storedFooter || `You are receiving this email from ${resolvedSender}.`
+  const resolvedSupport = supportEmail.trim() || storedSupport
 
   return (
     <div className="space-y-2">
@@ -980,7 +1094,7 @@ function UnsubscribeFooterSection({ product, productId }: { product: any; produc
           <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Unsubscribe footer</h2>
           <p className="text-[11px] text-muted-foreground mt-0.5">A one-click unsubscribe link is always included and cannot be disabled.</p>
         </div>
-        {isOwner && !editing && (
+        {!editing && (
           <Button variant="ghost" size="sm" onClick={() => { reset(); setEditing(true) }} className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1">
             <Pencil className="w-3 h-3" />
             Customize

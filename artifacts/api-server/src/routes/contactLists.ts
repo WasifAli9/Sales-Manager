@@ -219,6 +219,65 @@ router.post("/contact-lists/:id/members", async (req: Request, res: Response): P
   res.json({ added: permittedLeadIds.length });
 });
 
+// PUT /api/contact-lists/:id — rename and replace members
+router.put("/contact-lists/:id", async (req: Request, res: Response): Promise<void> => {
+  if (!requireAuth(req, res)) return;
+  const listId = parseId(req.params.id);
+  if (!listId) {
+    res.status(400).json({ error: "Invalid contact list" });
+    return;
+  }
+  const list = await getAccessibleList(req, listId);
+  if (!list) {
+    res.status(404).json({ error: "Contact list not found" });
+    return;
+  }
+
+  const { name, leadIds } = req.body as { name?: unknown; leadIds?: unknown };
+  const trimmedName = typeof name === "string" ? name.trim() : list.name;
+  const requestedIds = Array.isArray(leadIds)
+    ? [...new Set(leadIds.filter((id): id is number => Number.isInteger(id) && id > 0))]
+    : [];
+
+  if (!trimmedName || trimmedName.length > 120) {
+    res.status(400).json({ error: "Enter a contact list name (up to 120 characters)" });
+    return;
+  }
+  if (!requestedIds.length) {
+    res.status(400).json({ error: "Select at least one lead for this contact list" });
+    return;
+  }
+
+  const permittedLeadIds = await visibleLeadIds(req, requestedIds);
+  if (permittedLeadIds.length !== requestedIds.length) {
+    res.status(403).json({ error: "You can only add leads you are allowed to view" });
+    return;
+  }
+  if (!await leadsMatchListProduct(permittedLeadIds, list.productId)) {
+    res.status(400).json({ error: "A product contact list can only contain leads for that product" });
+    return;
+  }
+  if (!await leadsUseAccessibleProducts(req, permittedLeadIds)) {
+    res.status(403).json({ error: "You do not have access to every lead's product" });
+    return;
+  }
+
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(contactListsTable)
+      .set({ name: trimmedName })
+      .where(eq(contactListsTable.id, listId))
+      .returning();
+    await tx.delete(contactListMembersTable).where(eq(contactListMembersTable.listId, listId));
+    await tx.insert(contactListMembersTable).values(
+      permittedLeadIds.map((leadId) => ({ listId, leadId })),
+    );
+    return row;
+  });
+
+  res.json({ ...updated, memberCount: permittedLeadIds.length });
+});
+
 router.delete("/contact-lists/:id", async (req: Request, res: Response): Promise<void> => {
   if (!requireAuth(req, res)) return;
   const listId = parseId(req.params.id);

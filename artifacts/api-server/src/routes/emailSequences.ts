@@ -14,10 +14,12 @@ import {
   productsTable,
 } from "@workspace/db/schema";
 import { runJson } from "../lib/ai";
+import { emailBodyToHtml } from "../lib/emailBodyHtml";
 import { validateScheduledFor } from "../lib/validateScheduledFor";
 import { canAccessProduct } from "../lib/productAccess";
 import { resolveTagAudienceLeadIds } from "../lib/tagAudience";
 import { appendUnsubscribeFooter, createUnsubscribeToken } from "../lib/unsubscribe";
+import { resolveSenderEmailConfig } from "../lib/resolveSenderEmailConfig";
 
 const router: IRouter = Router();
 
@@ -87,8 +89,8 @@ function fromAddress(product: typeof productsTable.$inferSelect | null) {
   return `${product.fromName?.trim() || product.fromEmail} <${product.fromEmail}>`;
 }
 
-function withSignature(body: string, product: typeof productsTable.$inferSelect | null) {
-  return product?.emailSignature ? `${body}\n\n--\n${product.emailSignature}` : body;
+function withSignature(body: string, signature: string | null | undefined) {
+  return signature ? `${body}\n\n--\n${signature}` : body;
 }
 
 async function getSequence(sequenceId: number) {
@@ -134,6 +136,7 @@ async function prepareSequenceSchedule(
   requestedLeadIds: number[],
   startDate: Date,
   batchId = randomUUID(),
+  senderUserId?: string | null,
 ) {
   const sequence = await getSequence(sequenceId);
   if (!sequence) throw new Error("Sequence not found");
@@ -168,33 +171,47 @@ async function prepareSequenceSchedule(
     : [];
   const productMap = new Map(products.map((product) => [product.id, product]));
 
-  const values = eligibleLeads.flatMap((lead) => {
+  const senderConfigByProduct = new Map<number | null, Awaited<ReturnType<typeof resolveSenderEmailConfig>>>();
+  const getSenderConfig = async (productId: number | null) => {
+    if (!senderConfigByProduct.has(productId)) {
+      senderConfigByProduct.set(productId, await resolveSenderEmailConfig(productId, senderUserId));
+    }
+    return senderConfigByProduct.get(productId)!;
+  };
+
+  const values = [];
+  for (const lead of eligibleLeads) {
     const product = (sequence.productId ? productMap.get(sequence.productId) : undefined)
       ?? (lead.productId ? productMap.get(lead.productId) : undefined)
       ?? null;
-    return steps.map((step) => {
+    const senderConfig = await getSenderConfig(sequence.productId ?? lead.productId ?? null);
+    for (const step of steps) {
       const token = createUnsubscribeToken();
-      return {
+      values.push({
         leadId: lead.id,
         templateId: null,
         batchId,
         toAddress: lead.email!,
-        fromAddress: fromAddress(product),
+        fromAddress: senderConfig.from ?? fromAddress(product),
         subject: interpolate(step.subject, lead),
-        body: appendUnsubscribeFooter(withSignature(interpolate(step.body, lead), product), token, {
-          productName: product?.name,
-          footerText: product?.unsubscribeFooterText,
-          senderLabel: product?.unsubscribeSenderLabel,
-          supportEmail: product?.unsubscribeSupportEmail,
-        }),
+        body: appendUnsubscribeFooter(
+          withSignature(interpolate(step.body, lead), senderConfig.signature ?? product?.emailSignature),
+          token,
+          {
+            productName: senderConfig.productName ?? product?.name,
+            footerText: senderConfig.footerText ?? product?.unsubscribeFooterText,
+            senderLabel: senderConfig.senderLabel ?? product?.unsubscribeSenderLabel,
+            supportEmail: senderConfig.supportEmail ?? product?.unsubscribeSupportEmail,
+          },
+        ),
         unsubscribeToken: token,
-        status: "scheduled",
+        status: "scheduled" as const,
         scheduledFor: new Date(startDate.getTime() + step.delayDays * 86_400_000),
         sequenceId,
         sequenceStepId: step.id,
-      };
-    });
-  });
+      });
+    }
+  }
 
   return {
     values,
@@ -214,8 +231,9 @@ async function scheduleSequence(
   requestedLeadIds: number[],
   startDate: Date,
   batchId = randomUUID(),
+  senderUserId?: string | null,
 ) {
-  const prepared = await prepareSequenceSchedule(sequenceId, requestedLeadIds, startDate, batchId);
+  const prepared = await prepareSequenceSchedule(sequenceId, requestedLeadIds, startDate, batchId, senderUserId);
   if (prepared.values.length) await db.insert(emailSendsTable).values(prepared.values);
   return prepared.result;
 }
@@ -299,12 +317,30 @@ ${waits || "Only one email."}
 
 Write human, concise outreach. Avoid corporate filler and do not use bullets in the email bodies. Use at most one clear CTA per email. You may use {{firstName}}, {{company}}, {{title}}, {{lastName}}, and {{email}} as merge fields.
 
+BODY FORMAT (critical):
+- Write each email body as plain text with clear paragraph breaks.
+- Separate EVERY paragraph with a blank line (use \\n\\n between paragraphs).
+- Keep paragraphs short (1–3 sentences each). Never return one long run-on block.
+- Put greeting, problem, value, CTA, and sign-off in separate paragraphs when present.
+- Example shape:
+Hi {{firstName}},
+
+Quick question about {{company}}.
+
+Here is the idea in one short paragraph.
+
+Here is the CTA link on its own line:
+https://example.com
+
+Best,
+Name
+
 Return only JSON:
-{"name":"sequence name","description":"short optional description","steps":[{"name":"optional step name","subject":"subject","body":"plain-text email body"}]}`;
+{"name":"sequence name","description":"short optional description","steps":[{"name":"optional step name","subject":"subject","body":"plain-text email body with blank lines between paragraphs"}]}`;
 
   try {
     const { json } = await runJson(
-      "You are an experienced B2B sales copywriter. Return only valid JSON matching the requested shape.",
+      "You are an experienced B2B sales copywriter. Return only valid JSON matching the requested shape. Email bodies MUST include blank lines between paragraphs.",
       prompt,
     );
     const generated = generatedSequenceSchema.safeParse(json);
@@ -319,7 +355,11 @@ Return only JSON:
       description: generated.data.description ?? null,
       steps: generated.data.steps.map((step, index) => {
         if (index > 0) day += delaysBetweenEmails[index - 1];
-        return { ...step, delayDays: day };
+        return {
+          ...step,
+          body: emailBodyToHtml(step.body),
+          delayDays: day,
+        };
       }),
     });
   } catch (error) {
@@ -588,7 +628,7 @@ router.post("/email-sequences/:id/enroll", async (req: Request, res: Response): 
     return;
   }
   try {
-    const result = await scheduleSequence(sequenceId, permittedLeadIds, startAt);
+    const result = await scheduleSequence(sequenceId, permittedLeadIds, startAt, randomUUID(), req.user!.id);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not enroll contacts" });
@@ -659,7 +699,7 @@ router.post("/email-sequences/:id/launch", async (req: Request, res: Response): 
       return;
     }
     const batchId = randomUUID();
-    const prepared = await prepareSequenceSchedule(sequenceId, permittedLeadIds, startAt, batchId);
+    const prepared = await prepareSequenceSchedule(sequenceId, permittedLeadIds, startAt, batchId, req.user!.id);
     await db.transaction(async (tx) => {
       if (prepared.values.length) await tx.insert(emailSendsTable).values(prepared.values);
       await tx.insert(emailCampaignsTable).values({

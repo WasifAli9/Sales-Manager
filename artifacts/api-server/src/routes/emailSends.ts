@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { contactListsTable, emailCampaignsTable, emailSendsTable, emailSequencesTable, leadsTable, productsTable } from "@workspace/db/schema";
+import { contactListsTable, emailCampaignsTable, emailSendsTable, emailSequencesTable, leadsTable } from "@workspace/db/schema";
 import { eq, and, lte, gte, inArray, isNotNull, sql, desc, min, max } from "drizzle-orm";
 import { emailTemplatesTable } from "@workspace/db/schema";
 import { sendEmail, interpolate, salesFromEmail, type EmailAttachment } from "../lib/email";
@@ -9,56 +9,15 @@ import { logger } from "../lib/logger";
 import { validateScheduledFor } from "../lib/validateScheduledFor";
 import { canAccessProduct } from "../lib/productAccess";
 import { appendUnsubscribeFooter, createUnsubscribeToken, unsubscribeHeaders } from "../lib/unsubscribe";
+import { resolveSenderEmailConfig, type SenderEmailConfig } from "../lib/resolveSenderEmailConfig";
 
-interface ProductConfig {
-  from: string | undefined;
-  signature: string | undefined;
-  productName: string | undefined;
-  footerText: string | undefined;
-  senderLabel: string | undefined;
-  supportEmail: string | undefined;
-}
+type ProductConfig = SenderEmailConfig;
 
-/** Resolve the product-level email config for a lead.
- *  Returns the From address and email signature (if set on the product).
- *  Falls back to workspace defaults when fields are absent. */
-async function resolveProductConfig(leadId: number): Promise<ProductConfig> {
+/** Resolve email config for a lead, preferring the sender's personal product settings. */
+async function resolveProductConfig(leadId: number, senderUserId?: string | null): Promise<ProductConfig> {
   const [lead] = await db.select({ productId: leadsTable.productId })
     .from(leadsTable).where(eq(leadsTable.id, leadId)).limit(1);
-  if (!lead?.productId) {
-    return {
-      from: salesFromEmail(), signature: undefined, productName: undefined,
-      footerText: undefined, senderLabel: undefined, supportEmail: undefined,
-    };
-  }
-  const [product] = await db
-    .select({
-      fromEmail: productsTable.fromEmail,
-      fromName: productsTable.fromName,
-      emailSignature: productsTable.emailSignature,
-      name: productsTable.name,
-      unsubscribeFooterText: productsTable.unsubscribeFooterText,
-      unsubscribeSenderLabel: productsTable.unsubscribeSenderLabel,
-      unsubscribeSupportEmail: productsTable.unsubscribeSupportEmail,
-    })
-    .from(productsTable).where(eq(productsTable.id, lead.productId)).limit(1);
-  if (!product) {
-    return {
-      from: salesFromEmail(), signature: undefined, productName: undefined,
-      footerText: undefined, senderLabel: undefined, supportEmail: undefined,
-    };
-  }
-  const from = product.fromEmail
-    ? `${product.fromName?.trim() || product.fromEmail} <${product.fromEmail}>`
-    : salesFromEmail();
-  return {
-    from,
-    signature: product.emailSignature ?? undefined,
-    productName: product.name,
-    footerText: product.unsubscribeFooterText ?? undefined,
-    senderLabel: product.unsubscribeSenderLabel ?? undefined,
-    supportEmail: product.unsubscribeSupportEmail ?? undefined,
-  };
+  return resolveSenderEmailConfig(lead?.productId, senderUserId);
 }
 
 // Keep the old name as a convenience alias for callers that only need From
@@ -196,7 +155,7 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
   const resolvedSubject = interpolate(subject, vars);
   const resolvedBody = interpolate(body, vars);
 
-  const productConfig = await resolveProductConfig(lead.id);
+  const productConfig = await resolveProductConfig(lead.id, req.user?.id);
   const token = createUnsubscribeToken();
   const bodyWithControls = appendUnsubscribeFooter(
     appendSignature(resolvedBody, productConfig.signature),
@@ -466,7 +425,7 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
       phone: lead.phone ?? "",
     };
 
-    const productConfig = await resolveProductConfig(lead.id);
+    const productConfig = await resolveProductConfig(lead.id, req.user?.id);
     const token = createUnsubscribeToken();
     const interpolatedBody = interpolate(body, vars);
     const sendAt = new Date(scheduledDate.getTime() + offsetMs);
