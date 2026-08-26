@@ -46,6 +46,22 @@ function addMonth(ym: string, delta: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
 }
 
+/** Local YYYY-MM-DD for "today". */
+function todayISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+/**
+ * Start date for schedule generation.
+ * Current month → today (skip past days). Future months → the 1st.
+ */
+function scheduleStartForMonth(monthKey: string) {
+  const today = todayISO()
+  if (monthKey === today.slice(0, 7)) return today
+  return `${monthKey}-01`
+}
+
 function daysInMonth(ym: string) {
   const [y, m] = ym.split("-").map(Number)
   return new Date(y, m, 0).getDate()
@@ -616,13 +632,14 @@ function GenerateScheduleButton({
   }, [open])
 
   const nextMonth = addMonth(currentMonth, 1)
+  const thisMonthStart = scheduleStartForMonth(currentMonth)
 
   return (
     <div ref={ref} className="relative">
       <div className="flex items-center">
         <Button
           size="sm"
-          onClick={() => { onGenerate(`${currentMonth}-01`); setOpen(false) }}
+          onClick={() => { onGenerate(thisMonthStart); setOpen(false) }}
           disabled={isPending}
           className="rounded-r-none bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30 border-r-0"
         >
@@ -644,12 +661,15 @@ function GenerateScheduleButton({
         <div className="absolute right-0 top-full mt-1.5 w-48 bg-popover border border-border/30 rounded-xl shadow-2xl overflow-hidden z-40">
           <button
             className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-foreground hover:bg-muted/40 transition-colors text-left"
-            onClick={() => { onGenerate(`${currentMonth}-01`); setOpen(false) }}
+            onClick={() => { onGenerate(thisMonthStart); setOpen(false) }}
           >
             <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
             <div>
               <p className="font-medium leading-none mb-0.5">This month</p>
-              <p className="text-[10px] text-muted-foreground">{formatMonth(currentMonth)}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {formatMonth(currentMonth)}
+                {thisMonthStart !== `${currentMonth}-01` ? " · from today" : ""}
+              </p>
             </div>
           </button>
           <div className="border-t border-border/15" />
@@ -1125,11 +1145,11 @@ export function ProductSocialTab({ productId, productName = "Product" }: { produ
               <div>
                 <p className="text-foreground font-semibold">No content scheduled yet</p>
                 <p className="text-muted-foreground text-sm mt-1 max-w-xs mx-auto">
-                  Click "Generate Schedule" — ChatGPT will read your website and create a full month of Instagram and LinkedIn posts with AI-generated visuals.
+                  Click "Generate Schedule" — ChatGPT will read your website and create Instagram and LinkedIn posts for the remaining days of the month, with AI-generated visuals.
                 </p>
               </div>
               <Button
-                onClick={() => handleGenerate(`${month}-01`)}
+                onClick={() => handleGenerate(scheduleStartForMonth(month))}
                 disabled={isGenerating}
               >
                 <Sparkles className="w-4 h-4" />

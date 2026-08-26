@@ -124,8 +124,8 @@ router.get("/products/:id/email-sequence-settings", async (req, res): Promise<vo
 router.patch("/products/:id/email-sequence-settings", requireOwner, async (req, res): Promise<void> => {
   const id = Number.parseInt(String(req.params.id), 10);
   const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
-  if (!Number.isInteger(id) || id <= 0 || instruction.length > 10000) {
-    res.status(400).json({ error: "Instruction must be 10,000 characters or fewer" });
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid product id" });
     return;
   }
   const [updated] = await db

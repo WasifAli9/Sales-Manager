@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, Circle, BrainCircuit, Flag, AlertTriangle, Moon, Plus, Activity as ActivityIcon, Bell, ChevronRight, CalendarClock, Dumbbell, Flame } from "lucide-react"
+import { CheckCircle2, Circle, BrainCircuit, Flag, AlertTriangle, Moon, Plus, Activity as ActivityIcon, Bell, ChevronRight, CalendarClock, Dumbbell, Flame, Pencil } from "lucide-react"
 import { CourageBar } from "@/components/courage-bar"
 import { format } from "date-fns"
 import { ActivityStatus, ActivityCategory, Activity, TodaySummary } from "@workspace/api-client-react"
@@ -218,6 +218,7 @@ export default function TodayPage() {
                         )}
                       </div>
                     </div>
+                    <EditActivityDialog activity={act} />
                   </div>
                   {isDistraction && !isDone && (
                     <div className="flex gap-2 ml-[44px] mt-1">
@@ -366,74 +367,7 @@ function AddActivityDialog() {
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="title"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Action</FormLabel>
-                  <FormControl>
-                    <Input placeholder="What needs doing?" {...field} autoFocus />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="category"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="SELL">SELL</SelectItem>
-                        <SelectItem value="CX">CX</SelectItem>
-                        <SelectItem value="BUILD">BUILD</SelectItem>
-                        <SelectItem value="ADMIN">ADMIN</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="effortMinutes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Minutes</FormLabel>
-                    <FormControl>
-                      <Input type="number" {...field} />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </div>
-            
-            {needsDelegationCheck && (
-              <FormField
-                control={form.control}
-                name="delegateTo"
-                render={({ field }) => (
-                  <FormItem className="bg-warn/10 p-4 rounded-xl border border-warn/20 mt-4">
-                    <FormLabel className="text-warn-foreground">Who can own this instead of you?</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Name or leave blank if you MUST do it" {...field} className="bg-background" />
-                    </FormControl>
-                    <p className="text-xs text-warn-foreground/80 mt-1">
-                      Build/Admin tasks kill sales momentum. Just saying.
-                    </p>
-                  </FormItem>
-                )}
-              />
-            )}
-
+            <ActivityFormFields form={form} needsDelegationCheck={needsDelegationCheck} />
             <Button type="submit" className="w-full mt-4 min-h-[44px]" disabled={createActivity.isPending}>
               {createActivity.isPending ? "Adding..." : "Add to Today"}
             </Button>
@@ -441,6 +375,154 @@ function AddActivityDialog() {
         </Form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function EditActivityDialog({ activity }: { activity: Activity }) {
+  const { updateActivity } = useTodayMutations()
+  const [open, setOpen] = useState(false)
+  const form = useForm<AddActivityForm>({
+    resolver: zodResolver(addActivitySchema),
+    defaultValues: {
+      title: activity.title,
+      effortMinutes: activity.effortMinutes,
+      category: activity.category,
+      delegateTo: activity.delegateTo ?? "",
+    },
+  })
+
+  const category = form.watch("category")
+  const needsDelegationCheck = ['BUILD', 'ADMIN'].includes(category)
+
+  useEffect(() => {
+    if (!open) return
+    form.reset({
+      title: activity.title,
+      effortMinutes: activity.effortMinutes,
+      category: activity.category,
+      delegateTo: activity.delegateTo ?? "",
+    })
+  }, [open, activity, form])
+
+  const onSubmit = (data: AddActivityForm) => {
+    updateActivity.mutate({
+      id: activity.id,
+      data: {
+        title: data.title,
+        category: data.category,
+        effortMinutes: data.effortMinutes,
+        delegateTo: data.delegateTo || null,
+      },
+    }, {
+      onSuccess: () => setOpen(false),
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button
+          type="button"
+          title="Edit action"
+          className="shrink-0 mt-0.5 text-muted-foreground hover:text-primary transition-colors min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full hover:bg-muted/50"
+        >
+          <Pencil className="w-4 h-4" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Action</DialogTitle>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <ActivityFormFields form={form} needsDelegationCheck={needsDelegationCheck} />
+            <Button type="submit" className="w-full mt-4 min-h-[44px]" disabled={updateActivity.isPending}>
+              {updateActivity.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ActivityFormFields({
+  form,
+  needsDelegationCheck,
+}: {
+  form: ReturnType<typeof useForm<AddActivityForm>>
+  needsDelegationCheck: boolean
+}) {
+  return (
+    <>
+      <FormField
+        control={form.control}
+        name="title"
+        render={({ field }) => (
+          <FormItem>
+            <FormLabel>Action</FormLabel>
+            <FormControl>
+              <Input placeholder="What needs doing?" {...field} autoFocus />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          control={form.control}
+          name="category"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Category</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="SELL">SELL</SelectItem>
+                  <SelectItem value="CX">CX</SelectItem>
+                  <SelectItem value="BUILD">BUILD</SelectItem>
+                  <SelectItem value="ADMIN">ADMIN</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="effortMinutes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Minutes</FormLabel>
+              <FormControl>
+                <Input type="number" {...field} />
+              </FormControl>
+            </FormItem>
+          )}
+        />
+      </div>
+
+      {needsDelegationCheck && (
+        <FormField
+          control={form.control}
+          name="delegateTo"
+          render={({ field }) => (
+            <FormItem className="bg-warn/10 p-4 rounded-xl border border-warn/20 mt-4">
+              <FormLabel className="text-warn-foreground">Who can own this instead of you?</FormLabel>
+              <FormControl>
+                <Input placeholder="Name or leave blank if you MUST do it" {...field} className="bg-background" />
+              </FormControl>
+              <p className="text-xs text-warn-foreground/80 mt-1">
+                Build/Admin tasks kill sales momentum. Just saying.
+              </p>
+            </FormItem>
+          )}
+        />
+      )}
+    </>
   )
 }
 

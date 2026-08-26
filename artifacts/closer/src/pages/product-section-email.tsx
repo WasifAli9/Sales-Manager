@@ -1,4 +1,4 @@
-import { Link, useParams } from "wouter"
+import { useParams } from "wouter"
 import { useProductDetail } from "@/hooks/use-products"
 import { useProductDetailData, useProductDetailMutations } from "@/hooks/use-product-detail"
 import { Button } from "@/components/ui/button"
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags, ArrowRight, ListChecks } from "lucide-react"
+import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useQuery } from "@tanstack/react-query"
@@ -64,8 +64,6 @@ export default function ProductSectionEmail() {
 
        {/* Unsubscribe footer */}
        <UnsubscribeFooterSection product={product} productId={id} />
-
-        <EmailWorkspaceHub productId={id} />
 
       {/* Platform Readiness */}
       {platformStates.data && platformStates.data.length > 0 && (
@@ -130,55 +128,6 @@ const MERGE_FIELDS = ["{{firstName}}", "{{lastName}}", "{{company}}", "{{title}}
 
 function blankStep(delayDays = 0): SequenceStepDraft {
   return { name: "", delayDays, subject: "", body: "" }
-}
-
-function EmailWorkspaceHub({ productId }: { productId: number }) {
-  return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Outbound workspace</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Build reusable sequences and audiences in focused, full-page workspaces.
-        </p>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <Link href={`/products/${productId}/email/sequences`} className="group">
-          <div className="flex min-h-[132px] items-start gap-4 rounded-2xl border border-violet-500/20 bg-violet-500/[0.04] p-4 transition-colors hover:border-violet-400/40 hover:bg-violet-500/[0.08]">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-400">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-foreground">Email sequences</h3>
-                <ArrowRight className="h-4 w-4 shrink-0 text-violet-400 transition-transform group-hover:translate-x-0.5" />
-              </div>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Draft AI-assisted templates, refine every email, and launch campaigns without squeezing the editor into settings.
-              </p>
-            </div>
-          </div>
-        </Link>
-
-        <Link href={`/products/${productId}/email/lists`} className="group">
-          <div className="flex min-h-[132px] items-start gap-4 rounded-2xl border border-orange-500/20 bg-orange-500/[0.04] p-4 transition-colors hover:border-orange-400/40 hover:bg-orange-500/[0.08]">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
-              <ListChecks className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-foreground">Contact lists</h3>
-                <ArrowRight className="h-4 w-4 shrink-0 text-orange-400 transition-transform group-hover:translate-x-0.5" />
-              </div>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Create named, reusable campaign audiences from this product’s visible leads in one clear screen.
-              </p>
-            </div>
-          </div>
-        </Link>
-      </div>
-    </section>
-  )
 }
 
 export function ProductSequenceWorkspace({
@@ -500,7 +449,7 @@ export function ProductSequenceWorkspace({
         <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Number of emails</label>
-            <Input type="number" min={1} max={10} value={emailCount} onChange={event => setEmailCount(Math.max(1, Math.min(10, Number(event.target.value) || 1)))} className="bg-background/70" />
+            <Input type="number" min={1} max={365} value={emailCount} onChange={event => setEmailCount(Math.max(1, Math.min(365, Number(event.target.value) || 1)))} className="bg-background/70" />
           </div>
           {emailCount > 1 && (
             <div className="space-y-1.5">

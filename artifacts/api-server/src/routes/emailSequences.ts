@@ -33,14 +33,14 @@ const fullSequenceSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(2000).nullable().optional(),
   productId: z.number().int().positive().nullable().optional(),
-  steps: z.array(stepInputSchema).min(1).max(20),
+  steps: z.array(stepInputSchema).min(1).max(365),
 });
 
 const generateSequenceSchema = z.object({
   productId: z.number().int().positive(),
-  instruction: z.string().trim().min(5).max(10000),
-  emailCount: z.number().int().min(1).max(10),
-  delaysBetweenEmails: z.array(z.number().int().min(0).max(365)).max(9),
+  instruction: z.string().trim().min(5),
+  emailCount: z.number().int().min(1).max(365),
+  delaysBetweenEmails: z.array(z.number().int().min(0).max(365)).max(364),
 }).superRefine((value, ctx) => {
   if (value.delaysBetweenEmails.length !== value.emailCount - 1) {
     ctx.addIssue({ code: "custom", message: "Provide one delay for every gap between emails" });
@@ -54,7 +54,7 @@ const generatedSequenceSchema = z.object({
     name: z.string().trim().max(120).optional(),
     subject: z.string().trim().min(1).max(300),
     body: z.string().trim().min(1).max(25000),
-  })).min(1).max(10),
+  })).min(1).max(365),
 });
 
 function requireAuth(req: Request, res: Response): boolean {

@@ -98,13 +98,20 @@ export async function generateScheduleForProduct(
   const websiteText = await deps.scrapeWebsiteText(product.websiteUrl);
   const startDate   = `${monthKey}-01`;
 
+  // For the current calendar month, start from today so we don't schedule past days.
+  // (Monthly auto-gen always targets next month, so this mainly helps manual/API callers.)
+  const today = new Date().toISOString().split("T")[0]!;
+  const effectiveStart =
+    monthKey === today.slice(0, 7) && startDate < today ? today : startDate;
+
   deps.log.info({ productId, monthKey }, "social: generating content calendar");
-  const contentPosts = await deps.generateCalendar(product, websiteText, startDate);
+  const contentPosts = await deps.generateCalendar(product, websiteText, effectiveStart);
 
   if (!contentPosts.length) return { count: 0 };
 
   const rows: SocialPostRow[] = [];
   for (const p of contentPosts) {
+    if (p.date < effectiveStart) continue;
     rows.push({
       productId, platform: "instagram", scheduledDate: p.date, status: "pending_approval",
       theme: p.theme, caption: p.instagram.caption, hashtags: p.instagram.hashtags,

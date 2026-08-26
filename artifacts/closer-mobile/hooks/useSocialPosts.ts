@@ -50,6 +50,22 @@ export function daysInMonth(ym: string): number {
   return new Date(y, m, 0).getDate();
 }
 
+/** Local YYYY-MM-DD for today. */
+export function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Start date for schedule generation.
+ * Current month → today (skip past days). Future months → the 1st.
+ */
+export function scheduleStartForMonth(monthKey: string): string {
+  const today = todayISO();
+  if (monthKey === today.slice(0, 7)) return today;
+  return `${monthKey}-01`;
+}
+
 export function firstWeekdayOfMonth(ym: string): number {
   const [y, m] = ym.split('-').map(Number);
   return new Date(y, m - 1, 1).getDay();

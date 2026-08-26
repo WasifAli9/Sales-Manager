@@ -34,6 +34,7 @@ import {
   formatMonth,
   daysInMonth,
   firstWeekdayOfMonth,
+  scheduleStartForMonth,
   type SocialPost,
 } from '@/hooks/useSocialPosts';
 
@@ -62,7 +63,8 @@ function showMonthPicker(
   onSelect: (startDate: string, navigateTo?: string) => void
 ) {
   const nextMonth = addMonth(currentMonth, 1);
-  const thisLabel = `This month — ${formatMonth(currentMonth)}`;
+  const thisStart = scheduleStartForMonth(currentMonth);
+  const thisLabel = `This month — ${formatMonth(currentMonth)}${thisStart !== `${currentMonth}-01` ? ' (from today)' : ''}`;
   const nextLabel = `Next month — ${formatMonth(nextMonth)}`;
 
   if (Platform.OS === 'ios') {
@@ -74,7 +76,7 @@ function showMonthPicker(
         cancelButtonIndex: 2,
       },
       (idx) => {
-        if (idx === 0) onSelect(`${currentMonth}-01`);
+        if (idx === 0) onSelect(thisStart);
         if (idx === 1) onSelect(`${nextMonth}-01`, nextMonth);
       }
     );
@@ -84,7 +86,7 @@ function showMonthPicker(
       'Generate Schedule',
       'Choose which month to generate content for',
       [
-        { text: thisLabel, onPress: () => onSelect(`${currentMonth}-01`) },
+        { text: thisLabel, onPress: () => onSelect(thisStart) },
         { text: nextLabel, onPress: () => onSelect(`${nextMonth}-01`, nextMonth) },
         { text: 'Cancel', style: 'cancel' },
       ]
@@ -646,7 +648,7 @@ export function ProductSocialModal({ productId, productName, visible, onClose }:
                 No content scheduled
               </Text>
               <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-                Tap "Generate Schedule" to let AI create a full month of Instagram and LinkedIn posts.
+                Tap "Generate Schedule" to let AI create Instagram and LinkedIn posts for the remaining days of the month.
               </Text>
             </View>
           ) : (

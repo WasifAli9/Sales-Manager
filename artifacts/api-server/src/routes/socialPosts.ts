@@ -372,6 +372,30 @@ async function verifyCompetitorUrls(
     .map((r) => r.value);
 }
 
+/** Inclusive day count from startDate (YYYY-MM-DD) through the last day of that month. */
+function daysFromStartToMonthEnd(startDate: string): number {
+  const [y, m, d] = startDate.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return Math.max(1, lastDay - d + 1);
+}
+
+/** Local-ish UTC calendar date YYYY-MM-DD (server clock). */
+function todayISODate(): string {
+  return new Date().toISOString().split("T")[0]!;
+}
+
+/**
+ * If generating for the current month, never start before today.
+ * Future months keep the requested start (usually the 1st).
+ */
+function clampScheduleStartDate(requestedStart: string): string {
+  const today = todayISODate();
+  const monthKey = requestedStart.slice(0, 7);
+  const currentMonthKey = today.slice(0, 7);
+  if (monthKey === currentMonthKey && requestedStart < today) return today;
+  return requestedStart;
+}
+
 async function generateContentCalendarEnhanced(
   product: { name: string; description: string | null; aiSummary: string | null },
   websiteText: string,
@@ -385,6 +409,7 @@ async function generateContentCalendarEnhanced(
   },
   styleGuide?: string,
 ): Promise<ContentPost[]> {
+  const dayCount = daysFromStartToMonthEnd(startDate);
   const colorHint =
     brand.colors.length > 0
       ? `Brand colours to weave into image prompts: ${brand.colors.join(", ")}.`
@@ -415,7 +440,7 @@ async function generateContentCalendarEnhanced(
       },
       {
         role: "user",
-        content: `Generate a full 30-day social media content calendar.
+        content: `Generate a ${dayCount}-day social media content calendar covering ONLY the remaining days of the month.
 
 BUSINESS: ${product.name}
 DESCRIPTION: ${product.description ?? "B2B software"}
@@ -427,6 +452,12 @@ INDUSTRY: ${brand.industry}
 ${colorHint}
 ${compHint}${styleHint}
 START DATE: ${startDate}
+DAY COUNT: ${dayCount}
+
+Rules:
+- Create exactly ${dayCount} daily entries, one for each date from START DATE through the last day of that month.
+- Do NOT include any date before START DATE.
+- Dates must be consecutive calendar days starting at START DATE.
 
 Return JSON:
 {
@@ -446,7 +477,7 @@ Return JSON:
         "imagePrompt": "Detailed image prompt for a clean, professional branded graphic — modern design, relevant to the industry${styleGuide ? " — apply visual style guide" : ""}"
       }
     }
-    // ... all 30 days
+    // ... all ${dayCount} days
   ]
 }
 
@@ -463,7 +494,7 @@ Vary themes: product features, customer pain points, tips & tricks, company valu
   try {
     const parsed = JSON.parse(raw) as { posts?: ContentPost[] };
     const posts = parsed.posts ?? [];
-    if (posts.length > 0) return posts;
+    if (posts.length > 0) return posts.filter((p) => p.date >= startDate);
     // Empty posts array from a valid JSON response — fall through to recovery
   } catch {
     // JSON was truncated — try to salvage complete post objects below
@@ -510,7 +541,7 @@ Vary themes: product features, customer pain points, tips & tricks, company valu
 
   if (recovered.length > 0) {
     logger.info({ count: recovered.length }, "social: recovered posts from truncated response");
-    return recovered;
+    return recovered.filter((p) => p.date >= startDate);
   }
 
   throw new Error(
@@ -532,6 +563,7 @@ async function generateContentCalendar(
   websiteText: string,
   startDate: string,
 ): Promise<ContentPost[]> {
+  const dayCount = daysFromStartToMonthEnd(startDate);
   const response = await openai.chat.completions.create({
     model: "gpt-5",
     messages: [
@@ -545,13 +577,18 @@ async function generateContentCalendar(
       },
       {
         role: "user",
-        content: `Generate a 30-day social media content calendar.
+        content: `Generate a ${dayCount}-day social media content calendar covering ONLY the remaining days of the month.
 
 BUSINESS: ${product.name}
 DESCRIPTION: ${product.description || "B2B software product"}
 AI SUMMARY: ${product.aiSummary || ""}
 WEBSITE EXCERPT: ${websiteText}
 START DATE: ${startDate}
+DAY COUNT: ${dayCount}
+
+Rules:
+- Create exactly ${dayCount} daily entries from START DATE through month end.
+- Do NOT include any date before START DATE.
 
 Return JSON: {
   "posts": [
@@ -570,7 +607,7 @@ Return JSON: {
         "imagePrompt": "detailed DALL-E 3 prompt for a clean professional branded card"
       }
     }
-    ...all 30 days
+    ...all ${dayCount} days
   ]
 }
 
@@ -583,7 +620,7 @@ Vary themes: product features, pain points, tips, company values, testimonials, 
 
   const raw = response.choices[0]?.message?.content ?? "{}";
   const parsed = JSON.parse(raw) as { posts?: ContentPost[] };
-  return parsed.posts ?? [];
+  return (parsed.posts ?? []).filter((p) => p.date >= startDate);
 }
 
 // ── GET /api/products/:productId/social/posts ─────────────────────────────────
@@ -1204,7 +1241,8 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
       stylePreset?: string;
       assetUrls?: string[];
     };
-    const startDate   = body.startDate ?? new Date().toISOString().split("T")[0];
+    const requestedStart = body.startDate ?? todayISODate();
+    const startDate   = clampScheduleStartDate(requestedStart);
     const stylePreset = body.stylePreset || undefined;
     const assetUrls   = Array.isArray(body.assetUrls) ? body.assetUrls : [];
     const monthKey    = startDate.slice(0, 7);
@@ -1263,7 +1301,7 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
     });
     logger.info({ productId, monthKey }, "social: generating enhanced calendar");
 
-    // Clear existing posts for month
+    // Clear all posts for this month, then recreate only from startDate forward
     await db.delete(socialPostsTable).where(
       and(
         eq(socialPostsTable.productId, productId),
@@ -1295,6 +1333,7 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
     if (contentPosts.length > 0) {
       const rows: (typeof socialPostsTable.$inferInsert)[] = [];
       for (const p of contentPosts) {
+        if (p.date < startDate) continue;
         rows.push({
           productId, platform: "instagram",
           scheduledDate: p.date, status: "pending_approval",
@@ -1317,7 +1356,7 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
       .where(
         and(
           eq(socialPostsTable.productId, productId),
-          gte(socialPostsTable.scheduledDate, `${monthKey}-01`),
+          gte(socialPostsTable.scheduledDate, startDate),
           lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
         ),
       )

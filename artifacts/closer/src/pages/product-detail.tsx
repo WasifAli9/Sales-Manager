@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
-  ChevronRight, Globe, BrainCircuit, Kanban, BarChart3,
-  FileText, Mail, Sparkles, Loader2, Pencil, Save,
+  ChevronRight, Globe, Kanban, BarChart3,
+  FileText, Mail, Sparkles, Loader2, Pencil, Save, ListChecks, ArrowDownUp,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useState } from "react"
@@ -27,18 +27,6 @@ const SECTIONS = [
     chevronHover: "group-hover:text-sky-400",
     title: "Website Intelligence",
     description: "ICP, value prop, pricing & competitor landscape",
-  },
-  {
-    key: "strategist",
-    getHref: (id: number) => `/products/${id}/strategist`,
-    Icon: BrainCircuit,
-    iconBg: "bg-violet-500/10",
-    iconColor: "text-violet-400",
-    hoverBorder: "hover:border-violet-500/30",
-    hoverBg: "hover:bg-violet-500/5",
-    chevronHover: "group-hover:text-violet-400",
-    title: "The Strategist",
-    description: "AI-powered ICP, GTM, cadence & competitor strategy",
   },
   {
     key: "pipeline",
@@ -86,7 +74,7 @@ const SECTIONS = [
     hoverBg: "hover:bg-orange-500/5",
     chevronHover: "group-hover:text-orange-400",
     title: "Email Settings",
-    description: "Sender identity, signature & platform readiness",
+    description: "Sender identity, signature & unsubscribe footer",
   },
   {
     key: "social",
@@ -99,6 +87,30 @@ const SECTIONS = [
     chevronHover: "group-hover:text-pink-400",
     title: "Social Media",
     description: "Content calendar & automated post generation",
+  },
+  {
+    key: "email_sequences",
+    getHref: (id: number) => `/products/${id}/email/sequences`,
+    Icon: ArrowDownUp,
+    iconBg: "bg-violet-500/10",
+    iconColor: "text-violet-400",
+    hoverBorder: "hover:border-violet-500/30",
+    hoverBg: "hover:bg-violet-500/5",
+    chevronHover: "group-hover:text-violet-400",
+    title: "Email Sequences",
+    description: "AI-assisted templates, cadence & campaign launch",
+  },
+  {
+    key: "contact_lists",
+    getHref: (id: number) => `/products/${id}/email/lists`,
+    Icon: ListChecks,
+    iconBg: "bg-orange-500/10",
+    iconColor: "text-orange-400",
+    hoverBorder: "hover:border-orange-500/30",
+    hoverBg: "hover:bg-orange-500/5",
+    chevronHover: "group-hover:text-orange-400",
+    title: "Contact Lists",
+    description: "Named, reusable campaign audiences from your leads",
   },
 ] as const
 
@@ -114,7 +126,7 @@ export default function ProductDetail() {
         <div className="h-4 w-40 bg-muted rounded" />
         <div className="h-28 bg-muted rounded-2xl" />
         <div className="space-y-3">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="h-16 bg-muted rounded-2xl" />
           ))}
         </div>
