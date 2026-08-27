@@ -8,6 +8,7 @@
 
 export type ListActivitiesParams = {
 date?: string;
+beforeDate?: string;
 productId?: number;
 status?: string;
 };

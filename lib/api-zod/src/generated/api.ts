@@ -1024,6 +1024,7 @@ export const DeleteResourceResponse = zod.void()
 
 export const ListActivitiesQueryParams = zod.object({
   "date": zod.coerce.string().optional(),
+  "beforeDate": zod.coerce.string().optional(),
   "productId": zod.coerce.number().int().optional(),
   "status": zod.coerce.string().optional()
 })

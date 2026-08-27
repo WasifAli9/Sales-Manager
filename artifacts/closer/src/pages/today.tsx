@@ -29,7 +29,7 @@ class CourageBoundary extends Component<{ children: ReactNode }, { failed: boole
 }
 
 export default function TodayPage() {
-  const { summary, activities } = useTodayData()
+  const { summary, activities, stillOpen } = useTodayData()
   const { updateActivity, generateActivities } = useTodayMutations()
   const { dueReviews } = useDueReviews()
   const [isGenerating, setIsGenerating] = useState(false)
@@ -47,6 +47,7 @@ export default function TodayPage() {
 
   const sumData = summary.data
   const acts = activities.data || []
+  const openFromPriorDays = (stillOpen.data || []).filter(a => a.status === ActivityStatus.pending)
 
   // Courage bar: track completed SELL/CX outreach actions today
   const sellActs = acts.filter(a =>
@@ -58,6 +59,13 @@ export default function TodayPage() {
     updateActivity.mutate({
       id: act.id,
       data: { status: act.status === ActivityStatus.done ? ActivityStatus.pending : ActivityStatus.done }
+    })
+  }
+
+  const handleMoveToToday = (id: number) => {
+    updateActivity.mutate({
+      id,
+      data: { date: getTodayStr() }
     })
   }
 
@@ -179,8 +187,28 @@ export default function TodayPage() {
         <ReviewsDueSection reviews={dueReviews.data} />
       )}
 
+      {/* Incomplete tasks from previous days */}
+      {openFromPriorDays.length > 0 && (
+        <StillOpenSection
+          activities={openFromPriorDays}
+          onToggle={handleToggleAct}
+          onMoveToToday={handleMoveToToday}
+          onSkip={(id) => handleDelegateDefer(id, ActivityStatus.skipped)}
+        />
+      )}
+
       {/* Activities List */}
       <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+            Today
+          </h2>
+          {acts.filter(a => a.status === ActivityStatus.pending).length > 0 && (
+            <span className="text-[11px] text-muted-foreground">
+              {acts.filter(a => a.status === ActivityStatus.pending).length} open
+            </span>
+          )}
+        </div>
         {acts.length === 0 ? (
           <div className="text-center py-10 bg-card rounded-2xl border border-dashed border-border">
             <Flag className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-50" />
@@ -246,6 +274,112 @@ export default function TodayPage() {
 // ── Reviews Due Section ────────────────────────────────────────────────────
 import { Link } from "wouter"
 import { useMarkReviewed, type DueReview } from "@/hooks/use-pipeline-reviews"
+
+function StillOpenSection({
+  activities,
+  onToggle,
+  onMoveToToday,
+  onSkip,
+}: {
+  activities: Activity[]
+  onToggle: (act: Activity) => void
+  onMoveToToday: (id: number) => void
+  onSkip: (id: number) => void
+}) {
+  const today = getTodayStr()
+  const grouped = activities.reduce<Record<string, Activity[]>>((acc, act) => {
+    const key = act.date
+    if (!acc[key]) acc[key] = []
+    acc[key].push(act)
+    return acc
+  }, {})
+  const dates = Object.keys(grouped).sort((a, b) => b.localeCompare(a))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CalendarClock className="w-4 h-4 text-amber-400" />
+          <h2 className="text-sm font-bold uppercase tracking-wider text-amber-400">
+            Still open ({activities.length})
+          </h2>
+        </div>
+        <span className="text-[11px] text-muted-foreground">From previous days</span>
+      </div>
+
+      <div className="space-y-4">
+        {dates.map(dateStr => {
+          const dayActs = grouped[dateStr]
+          const overdue = dateStr < today
+          return (
+            <div key={dateStr} className="space-y-2">
+              <div className="flex items-center gap-2 px-0.5">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {format(new Date(dateStr + "T00:00:00"), "EEEE, d MMM")}
+                </p>
+                {overdue && (
+                  <Badge className="text-[9px] px-1.5 h-4 bg-red-500/20 text-red-400 border-red-500/30 border">
+                    Overdue
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-2">
+                {dayActs.map(act => (
+                  <div
+                    key={act.id}
+                    className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-3 space-y-2"
+                  >
+                    <div className="flex items-start gap-3">
+                      <button
+                        onClick={() => onToggle(act)}
+                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-amber-400 transition-colors min-w-[40px] min-h-[40px] flex items-center justify-center -ml-1.5 -mt-1.5 rounded-full"
+                        aria-label={`Mark ${act.title} done`}
+                      >
+                        <Circle className="w-5 h-5 text-amber-500/50" />
+                      </button>
+                      <div className="flex-1 min-w-0 pt-0.5">
+                        <p className="text-sm font-medium leading-tight break-words text-foreground">
+                          {act.title}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <Badge variant={act.category.toLowerCase() as any} className="text-[9px] uppercase px-1.5 py-0 h-5">
+                            {act.category}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground font-mono">{act.effortMinutes}m</span>
+                          {act.platform && (
+                            <span className="text-xs text-muted-foreground capitalize">{act.platform}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 flex-wrap pl-[40px]">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs rounded-xl border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                        onClick={() => onMoveToToday(act.id)}
+                      >
+                        Move to today
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs rounded-xl text-muted-foreground"
+                        onClick={() => onSkip(act.id)}
+                      >
+                        Skip
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function ReviewsDueSection({ reviews }: { reviews: DueReview[] }) {
   const { markReviewed } = useMarkReviewed()

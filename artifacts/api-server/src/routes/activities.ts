@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, eq, asc, type SQL } from "drizzle-orm";
+import { and, eq, asc, desc, lt, gte, type SQL } from "drizzle-orm";
 import {
   db,
   activitiesTable,
@@ -48,15 +48,30 @@ router.get("/activities", async (req, res): Promise<void> => {
 
   if (query.data.date !== undefined)
     conditions.push(eq(activitiesTable.date, query.data.date));
+  if (query.data.beforeDate !== undefined)
+    conditions.push(lt(activitiesTable.date, query.data.beforeDate));
   if (query.data.productId !== undefined)
     conditions.push(eq(activitiesTable.productId, query.data.productId));
   if (query.data.status !== undefined)
     conditions.push(eq(activitiesTable.status, query.data.status));
+
+  // When browsing prior incomplete days, keep the window recent and newest-first.
+  const browsingPrior = query.data.beforeDate !== undefined && query.data.date === undefined;
+  if (browsingPrior) {
+    const cutoff = new Date(`${query.data.beforeDate}T00:00:00Z`);
+    cutoff.setUTCDate(cutoff.getUTCDate() - 21);
+    conditions.push(gte(activitiesTable.date, cutoff.toISOString().slice(0, 10)));
+  }
+
   const rows = await db
     .select()
     .from(activitiesTable)
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(asc(activitiesTable.priority), asc(activitiesTable.id));
+    .orderBy(
+      ...(browsingPrior
+        ? [desc(activitiesTable.date), asc(activitiesTable.priority), asc(activitiesTable.id)]
+        : [asc(activitiesTable.priority), asc(activitiesTable.id)]),
+    );
   res.json(ListActivitiesResponse.parse(toJson(rows)));
 });
 

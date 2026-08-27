@@ -73,6 +73,42 @@ export function SectionSettingsPanel({ section, onChange, logoUrl }: Props) {
         <div className="space-y-3">
           <Input value={String(content.label ?? "")} onChange={e => patchContent(section, { label: e.target.value }, onChange)} placeholder="Button label" />
           <Input value={String(content.url ?? "")} onChange={e => patchContent(section, { url: e.target.value }, onChange)} placeholder="Button URL" />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1 text-xs text-muted-foreground">
+              Button colour
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={String(style.buttonColor ?? style.backgroundColor ?? "#14B8A6")}
+                  onChange={e => patchStyle(section, { buttonColor: e.target.value }, onChange)}
+                  className="h-8 w-10 cursor-pointer rounded border border-input bg-background p-0.5"
+                />
+                <Input
+                  value={String(style.buttonColor ?? style.backgroundColor ?? "#14B8A6")}
+                  onChange={e => patchStyle(section, { buttonColor: e.target.value }, onChange)}
+                  className="h-8 font-mono text-xs"
+                  placeholder="#14B8A6"
+                />
+              </div>
+            </label>
+            <label className="space-y-1 text-xs text-muted-foreground">
+              Text colour
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={String(style.textColor ?? "#ffffff")}
+                  onChange={e => patchStyle(section, { textColor: e.target.value }, onChange)}
+                  className="h-8 w-10 cursor-pointer rounded border border-input bg-background p-0.5"
+                />
+                <Input
+                  value={String(style.textColor ?? "#ffffff")}
+                  onChange={e => patchStyle(section, { textColor: e.target.value }, onChange)}
+                  className="h-8 font-mono text-xs"
+                  placeholder="#ffffff"
+                />
+              </div>
+            </label>
+          </div>
           {alignmentField}
         </div>
       );

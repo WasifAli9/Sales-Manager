@@ -1,14 +1,18 @@
 import { Link, useParams } from "wouter"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Copy, Eye, Loader2, Trash2 } from "lucide-react"
-import { useState } from "react"
+import { ArrowLeft, Copy, Eye, Loader2, Pencil, Save, Trash2 } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useProductDetail } from "@/hooks/use-products"
 import { Breadcrumbs } from "@/components/breadcrumbs"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import type { EmailSection } from "@/lib/email-sections"
-import { STARTER_SECTIONS } from "@/components/email-builder/blocks/registry"
+import { STARTER_SECTIONS, newSectionId } from "@/components/email-builder/blocks/registry"
+import { SectionSettingsPanel } from "@/components/email-builder/SectionSettingsPanel"
+import { SECTION_CATALOG } from "@/components/email-builder/blocks/registry"
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
@@ -23,11 +27,35 @@ type SavedSection = {
   updatedAt: string
 }
 
+type EditDraft = {
+  source: "saved" | "starter"
+  savedId?: number
+  name: string
+  description: string
+  category: string
+  sections: EmailSection[]
+  selectedIndex: number
+}
+
 async function fetchSavedSections(productId: number): Promise<SavedSection[]> {
   const res = await fetch(`${BASE}/api/products/${productId}/email-sections`, { credentials: "include" })
   if (!res.ok) throw new Error("Could not load saved sections")
   const data = await res.json()
   return data.sections ?? []
+}
+
+function cloneSections(sections: EmailSection[]): EmailSection[] {
+  return sections.map(s => ({
+    ...s,
+    id: newSectionId(),
+    content: { ...s.content },
+    style: { ...s.style },
+    savedSectionId: null,
+  }))
+}
+
+function labelForType(type: EmailSection["type"]) {
+  return SECTION_CATALOG.find(c => c.type === type)?.label ?? type
 }
 
 export default function ProductEmailSections() {
@@ -39,6 +67,8 @@ export default function ProductEmailSections() {
   const [tab, setTab] = useState<"mine" | "starters">("mine")
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
   const [previewKey, setPreviewKey] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
+  const [editPreviewHtml, setEditPreviewHtml] = useState<string | null>(null)
 
   const sectionsQuery = useQuery({
     queryKey: ["email-saved-sections", productId],
@@ -106,12 +136,113 @@ export default function ProductEmailSections() {
     onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
   })
 
+  const saveMut = useMutation({
+    mutationFn: async (draft: EditDraft) => {
+      if (draft.source === "saved" && draft.savedId) {
+        const res = await fetch(`${BASE}/api/email-sections/${draft.savedId}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: draft.name.trim(),
+            description: draft.description.trim() || null,
+            category: draft.category || "custom",
+            sections: draft.sections,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || "Could not update section")
+        return { mode: "updated" as const }
+      }
+
+      const res = await fetch(`${BASE}/api/products/${productId}/email-sections`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: draft.name.trim(),
+          description: draft.description.trim() || null,
+          category: draft.category || "custom",
+          sections: draft.sections,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Could not save section")
+      return { mode: "created" as const }
+    },
+    onSuccess: async (result) => {
+      await qc.invalidateQueries({ queryKey: ["email-saved-sections", productId] })
+      setEditDraft(null)
+      setEditPreviewHtml(null)
+      setTab("mine")
+      toast({ title: result.mode === "updated" ? "Section updated" : "Saved to My sections" })
+    },
+    onError: (error: Error) => toast({ title: error.message, variant: "destructive" }),
+  })
+
+  useEffect(() => {
+    if (!editDraft?.sections.length) {
+      setEditPreviewHtml(null)
+      return
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`${BASE}/api/email-sections/render-preview`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId, sections: editDraft.sections }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.ok && typeof data.html === "string") setEditPreviewHtml(data.html)
+      } catch {
+        // ignore live-preview failures while typing
+      }
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [editDraft?.sections, productId])
+
+  const openSavedEditor = (section: SavedSection) => {
+    setEditDraft({
+      source: "saved",
+      savedId: section.id,
+      name: section.name,
+      description: section.description ?? "",
+      category: section.category ?? "custom",
+      sections: cloneSections(section.sectionsJson),
+      selectedIndex: 0,
+    })
+  }
+
+  const openStarterEditor = (starter: (typeof STARTER_SECTIONS)[number]) => {
+    setEditDraft({
+      source: "starter",
+      name: starter.name,
+      description: starter.description,
+      category: starter.category,
+      sections: cloneSections(starter.sections),
+      selectedIndex: 0,
+    })
+  }
+
+  const updateSelectedSection = (patch: Partial<EmailSection>) => {
+    setEditDraft(current => {
+      if (!current) return current
+      const index = current.selectedIndex
+      return {
+        ...current,
+        sections: current.sections.map((s, i) => i === index ? { ...s, ...patch } : s),
+      }
+    })
+  }
+
   if (isLoading) {
     return <div className="space-y-4 p-4 animate-pulse"><div className="h-5 w-48 rounded bg-muted" /><div className="h-36 rounded-2xl bg-muted" /></div>
   }
   if (!product) return <div className="p-4 text-muted-foreground">Product not found</div>
 
   const saved = sectionsQuery.data ?? []
+  const selectedSection = editDraft?.sections[editDraft.selectedIndex] ?? null
 
   return (
     <div className="flex-1 space-y-5 px-4 pt-4 pb-24 lg:pb-10">
@@ -161,7 +292,7 @@ export default function ProductEmailSections() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
           ) : saved.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-              No saved sections yet. Build an email in a sequence and use <strong>Save as reusable</strong> in the visual builder.
+              No saved sections yet. Edit a starter below, or build an email and use <strong>Save as reusable</strong>.
             </div>
           ) : (
             saved.map(section => {
@@ -179,6 +310,9 @@ export default function ProductEmailSections() {
                       )}
                     </div>
                     <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => openSavedEditor(section)}>
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -219,16 +353,21 @@ export default function ProductEmailSections() {
                   <h2 className="text-sm font-semibold">{starter.name}</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">{starter.description}</p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5"
-                  disabled={previewMut.isPending}
-                  onClick={() => previewMut.mutate({ key, sections: starter.sections })}
-                >
-                  {previewMut.isPending && previewKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-                  Preview
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openStarterEditor(starter)}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={previewMut.isPending}
+                    onClick={() => previewMut.mutate({ key, sections: starter.sections })}
+                  >
+                    {previewMut.isPending && previewKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                    Preview
+                  </Button>
+                </div>
                 {previewKey === key && previewHtml && (
                   <div className="overflow-hidden rounded-xl border border-border bg-white">
                     <iframe title={`Preview ${starter.name}`} srcDoc={previewHtml} className="h-[220px] w-full border-0" />
@@ -239,6 +378,85 @@ export default function ProductEmailSections() {
           })}
         </div>
       )}
+
+      <Dialog open={!!editDraft} onOpenChange={open => { if (!open) { setEditDraft(null); setEditPreviewHtml(null) } }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editDraft?.source === "starter" ? "Customize starter section" : "Edit section"}</DialogTitle>
+          </DialogHeader>
+
+          {editDraft && (
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Name
+                  <Input value={editDraft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} />
+                </label>
+                <label className="space-y-1 text-xs text-muted-foreground">
+                  Category
+                  <Input value={editDraft.category} onChange={e => setEditDraft({ ...editDraft, category: e.target.value })} />
+                </label>
+              </div>
+              <label className="space-y-1 text-xs text-muted-foreground block">
+                Description
+                <Input value={editDraft.description} onChange={e => setEditDraft({ ...editDraft, description: e.target.value })} />
+              </label>
+
+              <div className="grid gap-4 lg:grid-cols-[180px_1fr]">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Blocks</p>
+                  {editDraft.sections.map((section, index) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => setEditDraft({ ...editDraft, selectedIndex: index })}
+                      className={cn(
+                        "w-full rounded-lg border px-2.5 py-2 text-left text-xs",
+                        editDraft.selectedIndex === index ? "border-primary/40 bg-primary/10" : "border-border bg-card",
+                      )}
+                    >
+                      {labelForType(section.type)}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Settings</p>
+                  {selectedSection ? (
+                    <SectionSettingsPanel
+                      section={selectedSection}
+                      onChange={updateSelectedSection}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Select a block to edit.</p>
+                  )}
+                </div>
+              </div>
+
+              {editPreviewHtml && (
+                <div className="overflow-hidden rounded-xl border border-border bg-white">
+                  <iframe title="Live section preview" srcDoc={editPreviewHtml} className="h-[240px] w-full border-0" />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => { setEditDraft(null); setEditPreviewHtml(null) }}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="gap-1.5"
+                  disabled={!editDraft.name.trim() || !editDraft.sections.length || saveMut.isPending}
+                  onClick={() => saveMut.mutate(editDraft)}
+                >
+                  {saveMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  {editDraft.source === "starter" ? "Save to My sections" : "Save changes"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

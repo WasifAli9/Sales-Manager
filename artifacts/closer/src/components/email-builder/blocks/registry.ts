@@ -18,7 +18,7 @@ export function createDefaultSection(type: SectionType): EmailSection {
     case "image":
       return { ...base, content: { url: "", alt: "", linkUrl: "" }, style: { ...base.style, alignment: "center" } };
     case "button":
-      return { ...base, content: { label: "Book a demo", url: "https://" }, style: { ...base.style, alignment: "center" } };
+      return { ...base, content: { label: "Book a demo", url: "https://" }, style: { ...base.style, alignment: "center", buttonColor: "#14B8A6", textColor: "#ffffff" } };
     case "divider":
       return { ...base, content: {}, style: { padding: 8, color: "#e2e8f0", thickness: 1, lineStyle: "solid" } };
     case "spacer":
@@ -53,6 +53,7 @@ export const STARTER_SECTIONS: Array<{ name: string; category: string; descripti
     sections: [{
       ...createDefaultSection("button"),
       content: { label: "See how it works", url: "https://" },
+      style: { padding: 16, alignment: "center", buttonColor: "#14B8A6", textColor: "#ffffff" },
     }],
   },
   {
