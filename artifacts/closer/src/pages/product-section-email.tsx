@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags, Palette, LayoutTemplate } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useQuery } from "@tanstack/react-query"
 import { getGetProductQueryKey, useUpdateProduct } from "@workspace/api-client-react"
@@ -16,6 +16,11 @@ import { Breadcrumbs } from "@/components/breadcrumbs"
 import { RichTextEditor } from "@/components/RichTextEditor"
 import { useToast } from "@/hooks/use-toast"
 import { emailBodyToHtml } from "@/lib/email-body"
+import { Link } from "wouter"
+import { useProductAssets, useUploadProductAsset } from "@/hooks/use-product-assets"
+import { EmailSectionBuilder } from "@/components/email-builder/EmailSectionBuilder"
+import { createDefaultSection } from "@/components/email-builder/blocks/registry"
+import type { EmailSection } from "@/lib/email-sections"
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
@@ -105,8 +110,45 @@ export default function ProductSectionEmail() {
       </div>
 
       <EmailIdentitySection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
+      {isOwner && <EmailBrandSection productId={id} />}
       <EmailSignatureSection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
       <UnsubscribeFooterSection product={product} productId={id} isOwner={!!isOwner} mySettings={mySettings} />
+
+      <Link
+        href={`/products/${id}/email/sections`}
+        className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 transition-colors hover:bg-emerald-500/[0.08]"
+      >
+        <span className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400">
+            <LayoutTemplate className="h-4 w-4" />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold text-foreground">Email sections library</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              Reusable headers, footers, and CTAs for the visual email builder.
+            </span>
+          </span>
+        </span>
+        <ExternalLink className="h-4 w-4 shrink-0 text-emerald-400" />
+      </Link>
+
+      <Link
+        href={`/products/${id}/email/templates`}
+        className="flex items-center justify-between gap-3 rounded-2xl border border-violet-500/20 bg-violet-500/[0.04] p-4 transition-colors hover:bg-violet-500/[0.08]"
+      >
+        <span className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500/15 text-violet-400">
+            <Palette className="h-4 w-4" />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold text-foreground">Email design templates</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              AI-generated layouts (plain, light, branded) you can apply to sequences.
+            </span>
+          </span>
+        </span>
+        <ExternalLink className="h-4 w-4 shrink-0 text-violet-400" />
+      </Link>
 
       {platformStates.data && platformStates.data.length > 0 && (
         <div className="space-y-2">
@@ -132,17 +174,30 @@ export default function ProductSectionEmail() {
   )
 }
 
+type StepEditorMode = "visual" | "classic"
+
 type SequenceStepDraft = {
   name: string
   delayDays: number
   subject: string
   body: string
+  sectionsJson: EmailSection[] | null
+  editorMode: StepEditorMode
+  designTemplateId: number | null
+  abTestEnabled: boolean
+  abTestSplitPercent: number
+  subjectVariantB: string
+  bodyVariantB: string
+  resendIfUnopened: boolean
+  resendAfterHours: number
 }
 
 type SequenceDraft = {
   sequenceId?: number
   name: string
   description: string
+  logoAssetId: number | null
+  designTemplateId: number | null
   steps: SequenceStepDraft[]
 }
 
@@ -151,6 +206,25 @@ interface SavedSequence {
   name: string
   description: string | null
   stepCount: number
+  logoAssetId?: number | null
+  designTemplateId?: number | null
+}
+
+type DesignTemplateOption = {
+  id: number
+  name: string
+  category: string
+  designIntensity: number
+}
+
+type EmailBrand = {
+  logoAssetId: number | null
+  logoUrl: string | null
+  primaryColor: string
+  secondaryColor: string
+  accentColor: string
+  backgroundColor: string
+  textColor: string
 }
 
 interface ContactListOption {
@@ -168,7 +242,63 @@ interface LeadTagOption {
 const MERGE_FIELDS = ["{{firstName}}", "{{lastName}}", "{{company}}", "{{title}}", "{{email}}"]
 
 function blankStep(delayDays = 0): SequenceStepDraft {
-  return { name: "", delayDays, subject: "", body: "" }
+  return {
+    name: "", delayDays, subject: "", body: "", sectionsJson: null, editorMode: "classic", designTemplateId: null,
+    abTestEnabled: false, abTestSplitPercent: 50, subjectVariantB: "", bodyVariantB: "",
+    resendIfUnopened: false, resendAfterHours: 48,
+  }
+}
+
+function stepHasContent(step: SequenceStepDraft): boolean {
+  return (step.sectionsJson?.length ?? 0) > 0 || step.body.trim().length > 0
+}
+
+function bodyToTextSection(body: string): EmailSection[] {
+  return [{
+    ...createDefaultSection("text"),
+    content: { html: body.trim() || "<p></p>" },
+  }]
+}
+
+function parseSectionsJson(raw: unknown): EmailSection[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  return raw as EmailSection[]
+}
+
+function stepFromApi(step: {
+  name?: string | null
+  delayDays: number
+  subject: string
+  body: string
+  sectionsJson?: unknown
+  designTemplateId?: number | null
+  abTestEnabled?: boolean | null
+  abTestSplitPercent?: number | null
+  subjectVariantB?: string | null
+  bodyVariantB?: string | null
+  resendIfUnopened?: boolean | null
+  resendAfterHours?: number | null
+}): SequenceStepDraft {
+  const sectionsJson = parseSectionsJson(step.sectionsJson)
+  return {
+    name: step.name ?? "",
+    delayDays: step.delayDays,
+    subject: step.subject,
+    body: emailBodyToHtml(step.body),
+    sectionsJson,
+    editorMode: sectionsJson ? "visual" : "classic",
+    designTemplateId: step.designTemplateId ?? null,
+    abTestEnabled: !!step.abTestEnabled,
+    abTestSplitPercent: step.abTestSplitPercent ?? 50,
+    subjectVariantB: step.subjectVariantB ?? "",
+    bodyVariantB: step.bodyVariantB ? emailBodyToHtml(step.bodyVariantB) : "",
+    resendIfUnopened: !!step.resendIfUnopened,
+    resendAfterHours: step.resendAfterHours ?? 48,
+  }
+}
+
+function emptyDraft(): SequenceDraft {
+  return { name: "", description: "", logoAssetId: null, designTemplateId: null, steps: [] }
 }
 
 export function ProductSequenceWorkspace({
@@ -186,7 +316,7 @@ export function ProductSequenceWorkspace({
   const [savingInstruction, setSavingInstruction] = useState(false)
   const [emailCount, setEmailCount] = useState(3)
   const [gaps, setGaps] = useState<number[]>([3, 4])
-  const [draft, setDraft] = useState<SequenceDraft>({ name: "", description: "", steps: [] })
+  const [draft, setDraft] = useState<SequenceDraft>(emptyDraft())
   const [generating, setGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
   const [generationPhase, setGenerationPhase] = useState("")
@@ -237,6 +367,35 @@ export function ProductSequenceWorkspace({
       return res.json()
     },
   })
+  const designTemplatesQuery = useQuery({
+    queryKey: ["email-design-templates", productId],
+    queryFn: async (): Promise<DesignTemplateOption[]> => {
+      const res = await fetch(`${BASE}/api/products/${productId}/email-design-templates`, { credentials: "include" })
+      if (!res.ok) throw new Error("Could not load design templates")
+      const data = await res.json()
+      return data.templates ?? []
+    },
+  })
+  const brandQuery = useQuery({
+    queryKey: ["email-brand", productId],
+    queryFn: async (): Promise<EmailBrand> => {
+      const res = await fetch(`${BASE}/api/products/${productId}/email-brand`, { credentials: "include" })
+      if (!res.ok) throw new Error("Could not load brand")
+      return res.json()
+    },
+  })
+  const assetsQuery = useProductAssets(productId)
+
+  const effectiveLogoUrl = useMemo(() => {
+    const assetId = draft.logoAssetId ?? brandQuery.data?.logoAssetId ?? null
+    if (!assetId) return brandQuery.data?.logoUrl ?? null
+    const asset = assetsQuery.data?.find(a => a.id === assetId)
+    if (asset?.storageUrl) {
+      const url = asset.storageUrl
+      return url.startsWith("http") || url.startsWith("data:") ? url : `${BASE}${url.startsWith("/") ? "" : "/"}${url}`
+    }
+    return brandQuery.data?.logoUrl ?? null
+  }, [draft.logoAssetId, brandQuery.data, assetsQuery.data])
 
   useEffect(() => {
     setGaps(previous => Array.from({ length: Math.max(0, emailCount - 1) }, (_, index) => previous[index] ?? 3))
@@ -339,9 +498,14 @@ export function ProductSequenceWorkspace({
       setDraft({
         name: result.name,
         description: result.description ?? "",
-        steps: (result.steps as SequenceDraft["steps"]).map(step => ({
-          ...step,
-          body: emailBodyToHtml(step.body),
+        logoAssetId: null,
+        designTemplateId: null,
+        steps: (result.steps as Array<{ name?: string; subject: string; body: string; delayDays: number; designTemplateId?: number | null }>).map(step => stepFromApi({
+          name: step.name ?? "",
+          delayDays: step.delayDays,
+          subject: step.subject,
+          body: step.body,
+          designTemplateId: step.designTemplateId ?? null,
         })),
       })
       setGenerationProgress(100)
@@ -377,8 +541,8 @@ export function ProductSequenceWorkspace({
   }
 
   const saveSequence = async () => {
-    if (!draft.name.trim() || !draft.steps.length || draft.steps.some(step => !step.subject.trim() || !step.body.trim())) {
-      toast({ title: "Finish the sequence first", description: "Every email needs a subject and body.", variant: "destructive" })
+    if (!draft.name.trim() || !draft.steps.length || draft.steps.some(step => !step.subject.trim() || !stepHasContent(step))) {
+      toast({ title: "Finish the sequence first", description: "Every email needs a subject and body content.", variant: "destructive" })
       return
     }
     setSaving(true)
@@ -392,7 +556,22 @@ export function ProductSequenceWorkspace({
           name: draft.name,
           description: draft.description || null,
           productId,
-          steps: draft.steps,
+          logoAssetId: draft.logoAssetId,
+          designTemplateId: draft.designTemplateId,
+          steps: draft.steps.map(step => ({
+            name: step.name,
+            delayDays: step.delayDays,
+            subject: step.subject,
+            body: step.editorMode === "classic" ? step.body : undefined,
+            sectionsJson: step.editorMode === "visual" ? step.sectionsJson : null,
+            designTemplateId: step.designTemplateId,
+            abTestEnabled: step.abTestEnabled,
+            abTestSplitPercent: step.abTestSplitPercent,
+            subjectVariantB: step.abTestEnabled ? step.subjectVariantB.trim() || null : null,
+            bodyVariantB: step.abTestEnabled && step.editorMode === "classic" ? step.bodyVariantB.trim() || null : null,
+            resendIfUnopened: step.resendIfUnopened,
+            resendAfterHours: step.resendAfterHours,
+          })),
         }),
       })
       const result = await res.json()
@@ -425,7 +604,9 @@ export function ProductSequenceWorkspace({
         sequenceId: sequence.id,
         name: sequence.name,
         description: sequence.description ?? "",
-        steps: steps.map(step => ({ name: step.name ?? "", delayDays: step.delayDays, subject: step.subject, body: emailBodyToHtml(step.body) })),
+        logoAssetId: sequence.logoAssetId ?? null,
+        designTemplateId: sequence.designTemplateId ?? null,
+        steps: steps.map(step => stepFromApi(step)),
       })
       setCampaignName(`${sequence.name} launch`)
     } catch {
@@ -549,7 +730,7 @@ export function ProductSequenceWorkspace({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => setDraft({ name: "", description: "", steps: [blankStep()] })} className="gap-1.5">
+        <Button variant="outline" size="sm" onClick={() => setDraft({ ...emptyDraft(), steps: [blankStep()] })} className="gap-1.5">
           <Plus className="w-3.5 h-3.5" /> Start manually
         </Button>
         {(sequencesQuery.data?.length ?? 0) > 0 && (
@@ -570,6 +751,38 @@ export function ProductSequenceWorkspace({
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">Internal description</label>
               <Input value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} placeholder="Who this sequence is for" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Sequence logo</label>
+              <select
+                value={draft.logoAssetId ?? ""}
+                onChange={event => setDraft({ ...draft, logoAssetId: event.target.value ? Number(event.target.value) : null })}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Product brand logo (default)</option>
+                {(assetsQuery.data ?? []).filter(a => a.type === "logo" || a.type === "other").map(asset => (
+                  <option key={asset.id} value={asset.id}>{asset.name}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">Used in design templates and the Insert logo button. Upload logos under Email Settings.</p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Design template (entire sequence)</label>
+              <select
+                value={draft.designTemplateId ?? ""}
+                onChange={event => setDraft({ ...draft, designTemplateId: event.target.value ? Number(event.target.value) : null })}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
+              >
+                <option value="">None (personal / plain body only)</option>
+                {(designTemplatesQuery.data ?? []).map(template => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} · L{template.designIntensity}
+                  </option>
+                ))}
+              </select>
+              <Link href={`/products/${productId}/email/templates`} className="text-[11px] text-violet-400 hover:underline">
+                Manage / generate templates
+              </Link>
             </div>
           </div>
           <div className="rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -598,8 +811,160 @@ export function ProductSequenceWorkspace({
                   </Button>
                 </div>
               </div>
-              <Input value={step.subject} onChange={event => updateDraftStep(index, { subject: event.target.value })} placeholder="Email subject" className="bg-background" />
-              <RichTextEditor value={step.body} onChange={body => updateDraftStep(index, { body })} variables={MERGE_FIELDS} minHeight={230} placeholder={`Hi {{firstName}},\n\n`} />
+              <Input value={step.subject} onChange={event => updateDraftStep(index, { subject: event.target.value })} placeholder="Email subject (variant A)" className="bg-background" />
+              <div className="rounded-xl border border-border/50 bg-muted/10 p-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">A/B subject test</p>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={step.abTestEnabled}
+                      onChange={event => updateDraftStep(index, { abTestEnabled: event.target.checked })}
+                    />
+                    Enable
+                  </label>
+                </div>
+                {step.abTestEnabled && (
+                  <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
+                    <Input
+                      value={step.subjectVariantB}
+                      onChange={event => updateDraftStep(index, { subjectVariantB: event.target.value })}
+                      placeholder="Subject variant B"
+                      className="bg-background h-8 text-xs"
+                    />
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      A split
+                      <Input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={step.abTestSplitPercent}
+                        onChange={event => updateDraftStep(index, { abTestSplitPercent: Math.max(1, Math.min(99, Number(event.target.value) || 50)) })}
+                        className="h-8 w-16 text-center text-xs"
+                      />
+                      %
+                    </label>
+                    {step.editorMode === "classic" && (
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-[11px] text-muted-foreground">Body variant B (optional — uses variant A body if empty)</label>
+                        <RichTextEditor
+                          value={step.bodyVariantB}
+                          onChange={bodyVariantB => updateDraftStep(index, { bodyVariantB })}
+                          minHeight={140}
+                          logoUrl={effectiveLogoUrl}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="rounded-xl border border-border/50 bg-muted/10 p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Resend if not opened</p>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={step.resendIfUnopened}
+                      onChange={event => updateDraftStep(index, { resendIfUnopened: event.target.checked })}
+                    />
+                    Enable
+                  </label>
+                </div>
+                {step.resendIfUnopened && (
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    Wait
+                    <Input
+                      type="number"
+                      min={1}
+                      max={720}
+                      value={step.resendAfterHours}
+                      onChange={event => updateDraftStep(index, { resendAfterHours: Math.max(1, Math.min(720, Number(event.target.value) || 48)) })}
+                      className="h-8 w-20 text-center text-xs"
+                    />
+                    hours after send, then resend once with “Re:” subject
+                  </label>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-[11px] text-muted-foreground">Design override</label>
+                <select
+                  value={step.designTemplateId ?? ""}
+                  onChange={event => updateDraftStep(index, { designTemplateId: event.target.value ? Number(event.target.value) : null })}
+                  className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                >
+                  <option value="">Inherit sequence template</option>
+                  {(designTemplatesQuery.data ?? []).map(template => (
+                    <option key={template.id} value={template.id}>
+                      {template.name} · L{template.designIntensity}
+                    </option>
+                  ))}
+                </select>
+                {(step.designTemplateId || draft.designTemplateId) && (
+                  <Badge variant="outline" className="text-[10px]">
+                    {step.designTemplateId ? "Custom design" : "Sequence design"}
+                  </Badge>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex rounded-lg border border-input bg-background p-0.5">
+                  {(["visual", "classic"] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => {
+                        if (mode === "visual" && step.editorMode === "classic") {
+                          const sections = step.sectionsJson?.length
+                            ? step.sectionsJson
+                            : step.body.trim()
+                              ? bodyToTextSection(step.body)
+                              : [createDefaultSection("text")]
+                          updateDraftStep(index, { editorMode: "visual", sectionsJson: sections })
+                          return
+                        }
+                        if (mode === "classic" && step.editorMode === "visual") {
+                          updateDraftStep(index, { editorMode: "classic" })
+                          return
+                        }
+                      }}
+                      className={`rounded-md px-2.5 py-1 text-[11px] font-medium capitalize ${step.editorMode === mode ? "bg-primary/15 text-primary" : "text-muted-foreground"}`}
+                    >
+                      {mode === "visual" ? "Visual builder" : "Classic editor"}
+                    </button>
+                  ))}
+                </div>
+                {step.editorMode === "classic" && !step.sectionsJson?.length && step.body.trim() && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => updateDraftStep(index, {
+                      editorMode: "visual",
+                      sectionsJson: bodyToTextSection(step.body),
+                    })}
+                  >
+                    Convert to sections
+                  </Button>
+                )}
+              </div>
+              {step.editorMode === "visual" ? (
+                <EmailSectionBuilder
+                  productId={productId}
+                  sections={step.sectionsJson ?? []}
+                  onChange={sectionsJson => updateDraftStep(index, { sectionsJson })}
+                  logoUrl={effectiveLogoUrl}
+                  designTemplateId={step.designTemplateId ?? draft.designTemplateId}
+                />
+              ) : (
+                <RichTextEditor
+                  value={step.body}
+                  onChange={body => updateDraftStep(index, { body })}
+                  variables={MERGE_FIELDS}
+                  logoUrl={effectiveLogoUrl}
+                  minHeight={230}
+                  placeholder={`Hi {{firstName}},\n\n`}
+                />
+              )}
               {index < draft.steps.length - 1 && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   Wait after this email
@@ -674,6 +1039,170 @@ export function ProductSequenceWorkspace({
         {campaignAudience === "list" && !contactListsQuery.data?.length && <p className="text-xs text-muted-foreground">Create a list from the Leads page first, or switch to a tag audience.</p>}
       </div>
     </section>
+  )
+}
+
+// ── Email Brand Section (logo + colours) ───────────────────────────────────────
+function EmailBrandSection({ productId }: { productId: number }) {
+  const { toast } = useToast()
+  const qc = useQueryClient()
+  const assetsQuery = useProductAssets(productId)
+  const uploadAsset = useUploadProductAsset(productId)
+  const brandQuery = useQuery({
+    queryKey: ["email-brand", productId],
+    queryFn: async (): Promise<EmailBrand & { fontStack?: string }> => {
+      const res = await fetch(`${BASE}/api/products/${productId}/email-brand`, { credentials: "include" })
+      if (!res.ok) throw new Error("Could not load brand")
+      return res.json()
+    },
+  })
+
+  const [logoAssetId, setLogoAssetId] = useState<number | null>(null)
+  const [primaryColor, setPrimaryColor] = useState("#0F766E")
+  const [secondaryColor, setSecondaryColor] = useState("#134E4A")
+  const [accentColor, setAccentColor] = useState("#14B8A6")
+  const [backgroundColor, setBackgroundColor] = useState("#FFFFFF")
+  const [textColor, setTextColor] = useState("#0F172A")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!brandQuery.data) return
+    setLogoAssetId(brandQuery.data.logoAssetId)
+    setPrimaryColor(brandQuery.data.primaryColor || "#0F766E")
+    setSecondaryColor(brandQuery.data.secondaryColor || "#134E4A")
+    setAccentColor(brandQuery.data.accentColor || "#14B8A6")
+    setBackgroundColor(brandQuery.data.backgroundColor || "#FFFFFF")
+    setTextColor(brandQuery.data.textColor || "#0F172A")
+  }, [brandQuery.data])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch(`${BASE}/api/products/${productId}/email-brand`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logoAssetId,
+          primaryColor,
+          secondaryColor,
+          accentColor,
+          backgroundColor,
+          textColor,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || "Could not save brand")
+      await qc.invalidateQueries({ queryKey: ["email-brand", productId] })
+      toast({ title: "Brand settings saved" })
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Save failed", variant: "destructive" })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onUploadLogo = async (file: File | null) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || "")
+      const base64 = dataUrl.split(",")[1]
+      if (!base64) return
+      try {
+        const asset = await uploadAsset.mutateAsync({
+          name: file.name.replace(/\.[^.]+$/, "") || "Logo",
+          type: "logo",
+          imageBase64: base64,
+          mimeType: file.type || "image/png",
+        })
+        setLogoAssetId(asset.id)
+        toast({ title: "Logo uploaded", description: "Click Save brand to apply it." })
+      } catch (error) {
+        toast({ title: error instanceof Error ? error.message : "Upload failed", variant: "destructive" })
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const logoPreview = (() => {
+    if (logoAssetId) {
+      const asset = assetsQuery.data?.find(a => a.id === logoAssetId)
+      if (asset?.storageUrl) {
+        const url = asset.storageUrl
+        return url.startsWith("http") || url.startsWith("data:") ? url : `${BASE}${url.startsWith("/") ? "" : "/"}${url}`
+      }
+    }
+    return brandQuery.data?.logoUrl ?? null
+  })()
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold flex items-center gap-2">
+            <Palette className="h-4 w-4 text-violet-400" />
+            Email brand
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Logo and colours used by design templates and sequence logo tags.
+          </p>
+        </div>
+        <Button size="sm" onClick={save} disabled={saving} className="gap-1.5">
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save brand
+        </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
+        <div className="space-y-2">
+          <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 p-2">
+            {logoPreview ? (
+              <img src={logoPreview} alt="Brand logo" className="max-h-full max-w-full object-contain" />
+            ) : (
+              <span className="text-[11px] text-muted-foreground">No logo</span>
+            )}
+          </div>
+          <label className="inline-flex h-8 w-full cursor-pointer items-center justify-center rounded-lg border border-border text-xs hover:bg-muted/40">
+            {uploadAsset.isPending ? "Uploading…" : "Upload logo"}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={event => void onUploadLogo(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <select
+            value={logoAssetId ?? ""}
+            onChange={event => setLogoAssetId(event.target.value ? Number(event.target.value) : null)}
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-xs"
+          >
+            <option value="">No logo</option>
+            {(assetsQuery.data ?? []).map(asset => (
+              <option key={asset.id} value={asset.id}>{asset.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {([
+            ["Primary", primaryColor, setPrimaryColor],
+            ["Secondary", secondaryColor, setSecondaryColor],
+            ["Accent", accentColor, setAccentColor],
+            ["Background", backgroundColor, setBackgroundColor],
+            ["Text", textColor, setTextColor],
+          ] as const).map(([label, value, setter]) => (
+            <label key={label} className="space-y-1 text-xs text-muted-foreground">
+              {label}
+              <div className="flex items-center gap-2">
+                <input type="color" value={value} onChange={event => setter(event.target.value)} className="h-8 w-10 cursor-pointer rounded border border-border bg-transparent" />
+                <Input value={value} onChange={event => setter(event.target.value)} className="h-8 font-mono text-xs" />
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -962,25 +1491,27 @@ function EmailSignatureSection({
       {editing ? (
         <div className="rounded-2xl border border-border bg-card px-4 py-4 space-y-3">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Signature text</label>
-            <Textarea
+            <label className="text-xs font-medium text-muted-foreground">Signature</label>
+            <RichTextEditor
               value={signature}
-              onChange={e => setSignature(e.target.value)}
-              placeholder={"Jane Smith\nHead of Sales · Acme Inc.\njane@acme.com · +1 555 000 0000"}
-              rows={5}
-              className="rounded-xl text-sm resize-none bg-muted/40 border-border/30"
+              onChange={setSignature}
+              minHeight={160}
+              placeholder={"Kind Regards,\nYour Name\nyour@company.com"}
             />
             <p className="text-[11px] text-muted-foreground">
-              Plain text only. Appended after a <span className="font-mono">--</span> separator on emails you send.
+              Rich text supported — line breaks, links, and spacing are preserved in sent emails.
             </p>
           </div>
 
           {signature.trim() && (
             <div className="rounded-xl bg-muted/40 px-3 py-2 space-y-1">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Preview</p>
-              <pre className="text-xs text-foreground whitespace-pre-wrap font-sans leading-relaxed">
-                {"--\n"}{signature.trim()}
-              </pre>
+              <div
+                className="text-sm text-foreground leading-relaxed [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-3"
+                dangerouslySetInnerHTML={{
+                  __html: signature.trim().startsWith("<") ? signature.trim() : signature.trim().replace(/\n/g, "<br>"),
+                }}
+              />
             </div>
           )}
 
@@ -1010,9 +1541,14 @@ function EmailSignatureSection({
       ) : (
         <div className="rounded-2xl border border-border bg-card px-4 py-3">
           {displaySignature ? (
-            <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed">
-              {displaySignature}
-            </pre>
+            <div
+              className="text-sm text-foreground leading-relaxed [&_a]:text-blue-600 [&_a]:underline [&_p]:mb-3"
+              dangerouslySetInnerHTML={{
+                __html: displaySignature.trim().startsWith("<")
+                  ? displaySignature
+                  : displaySignature.replace(/\n/g, "<br>"),
+              }}
+            />
           ) : (
             <p className="text-xs text-muted-foreground italic">
               No signature set — outbound emails will have no automatic sign-off.

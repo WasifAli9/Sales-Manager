@@ -214,6 +214,9 @@ interface Campaign {
   firstSendAt: string | null
   lastSendAt: string | null
   createdAt: string | null
+  paused?: number
+  lifecycle?: string
+  sequenceName?: string | null
 }
 
 interface CampaignSend {
@@ -566,7 +569,6 @@ export function BulkScheduleDialog({
                 Signature (appended automatically)
               </p>
               <div className="border-t border-border/20 pt-2">
-                <p className="text-[10px] text-muted-foreground/50 font-mono mb-1">--</p>
                 <p className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{bulkSignature}</p>
               </div>
             </div>
@@ -660,8 +662,8 @@ function CampaignRow({ campaign, onCancelled }: { campaign: Campaign; onCancelle
     onError: () => toast({ title: "Failed to cancel campaign", variant: "destructive" }),
   })
 
-  const isCancellable = campaign.scheduled > 0
-  const isDone = campaign.scheduled === 0 && campaign.cancelled === 0
+  const isCancellable = campaign.scheduled > 0 || (campaign.paused ?? 0) > 0
+  const isDone = campaign.scheduled === 0 && (campaign.paused ?? 0) === 0 && campaign.cancelled === 0
 
   // Time spread label
   const spreadLabel = (() => {
@@ -729,6 +731,11 @@ function CampaignRow({ campaign, onCancelled }: { campaign: Campaign; onCancelle
             {campaign.scheduled > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-amber-400 bg-amber-400/10">
                 {campaign.scheduled} pending
+              </span>
+            )}
+            {(campaign.paused ?? 0) > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-amber-400 bg-amber-400/10">
+                {campaign.paused} paused
               </span>
             )}
             {campaign.failed > 0 && (
@@ -1325,7 +1332,6 @@ export function EmailComposeDialog({
                   Signature (appended automatically)
                 </p>
                 <div className="border-t border-border/20 pt-2">
-                  <p className="text-[10px] text-muted-foreground/50 font-mono mb-1">--</p>
                   <p className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{emailSignature}</p>
                 </div>
               </div>

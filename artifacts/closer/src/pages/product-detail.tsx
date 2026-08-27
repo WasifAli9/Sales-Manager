@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   ChevronRight, Globe, Kanban, BarChart3,
-  FileText, Mail, Sparkles, Loader2, Pencil, Save, ListChecks, ArrowDownUp,
+  FileText, Mail, Sparkles, Loader2, Pencil, Save, ListChecks, ArrowDownUp, Palette, LayoutTemplate,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useState } from "react"
@@ -75,6 +75,30 @@ const SECTIONS = [
     chevronHover: "group-hover:text-orange-400",
     title: "Email Settings",
     description: "Sender identity, signature & unsubscribe footer",
+  },
+  {
+    key: "email_templates",
+    getHref: (id: number) => `/products/${id}/email/templates`,
+    Icon: Palette,
+    iconBg: "bg-violet-500/10",
+    iconColor: "text-violet-400",
+    hoverBorder: "hover:border-violet-500/30",
+    hoverBg: "hover:bg-violet-500/5",
+    chevronHover: "group-hover:text-violet-400",
+    title: "Email Templates",
+    description: "AI branded layouts to apply across sequences",
+  },
+  {
+    key: "email_sections",
+    getHref: (id: number) => `/products/${id}/email/sections`,
+    Icon: LayoutTemplate,
+    iconBg: "bg-emerald-500/10",
+    iconColor: "text-emerald-400",
+    hoverBorder: "hover:border-emerald-500/30",
+    hoverBg: "hover:bg-emerald-500/5",
+    chevronHover: "group-hover:text-emerald-400",
+    title: "Email Sections",
+    description: "Reusable headers, footers & blocks for the visual builder",
   },
   {
     key: "social",

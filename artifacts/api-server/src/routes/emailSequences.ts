@@ -20,6 +20,10 @@ import { canAccessProduct } from "../lib/productAccess";
 import { resolveTagAudienceLeadIds } from "../lib/tagAudience";
 import { appendUnsubscribeFooter, createUnsubscribeToken } from "../lib/unsubscribe";
 import { resolveSenderEmailConfig } from "../lib/resolveSenderEmailConfig";
+import { loadSequenceDesignContext, renderSequenceStepBody, loadBrandForProduct } from "../lib/emailDesignContext";
+import { coerceSections, renderSectionsBodyFragment } from "../lib/emailSectionRender";
+import { appendSignatureHtml, signatureContentHtml } from "../lib/emailSignatureHtml";
+import { appPublicUrl } from "../lib/appUrl";
 
 const router: IRouter = Router();
 
@@ -27,7 +31,22 @@ const stepInputSchema = z.object({
   name: z.string().trim().max(120).optional().nullable(),
   delayDays: z.number().int().min(0).max(3650),
   subject: z.string().trim().min(1).max(300),
-  body: z.string().trim().min(1).max(25000),
+  body: z.string().trim().max(25000).optional(),
+  sectionsJson: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
+  designTemplateId: z.number().int().positive().nullable().optional(),
+  abTestEnabled: z.boolean().optional(),
+  abTestSplitPercent: z.number().int().min(1).max(99).optional(),
+  subjectVariantB: z.string().trim().max(300).optional().nullable(),
+  bodyVariantB: z.string().trim().max(25000).optional().nullable(),
+  sectionsJsonVariantB: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
+  resendIfUnopened: z.boolean().optional(),
+  resendAfterHours: z.number().int().min(1).max(720).optional(),
+}).superRefine((step, ctx) => {
+  const hasSections = Array.isArray(step.sectionsJson) && step.sectionsJson.length > 0;
+  const hasBody = typeof step.body === "string" && step.body.trim().length > 0;
+  if (!hasSections && !hasBody) {
+    ctx.addIssue({ code: "custom", message: "Each email needs body content or sections" });
+  }
 });
 
 const fullSequenceSchema = z.object({
@@ -35,6 +54,8 @@ const fullSequenceSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(2000).nullable().optional(),
   productId: z.number().int().positive().nullable().optional(),
+  logoAssetId: z.number().int().positive().nullable().optional(),
+  designTemplateId: z.number().int().positive().nullable().optional(),
   steps: z.array(stepInputSchema).min(1).max(365),
 });
 
@@ -90,7 +111,55 @@ function fromAddress(product: typeof productsTable.$inferSelect | null) {
 }
 
 function withSignature(body: string, signature: string | null | undefined) {
-  return signature ? `${body}\n\n--\n${signature}` : body;
+  return appendSignatureHtml(body, signature);
+}
+
+function pickAbVariant(step: {
+  abTestEnabled?: boolean | null;
+  abTestSplitPercent?: number | null;
+  subjectVariantB?: string | null;
+}): "A" | "B" | null {
+  if (!step.abTestEnabled || !step.subjectVariantB?.trim()) return null;
+  const split = step.abTestSplitPercent ?? 50;
+  return Math.random() * 100 < split ? "A" : "B";
+}
+
+function stepVariantContent(
+  step: {
+    subject: string;
+    body: string;
+    sectionsJson?: unknown[] | null;
+    subjectVariantB?: string | null;
+    bodyVariantB?: string | null;
+    sectionsJsonVariantB?: unknown[] | null;
+  },
+  variant: "A" | "B" | null,
+) {
+  if (variant !== "B") {
+    return {
+      subject: step.subject,
+      sections: coerceSections(step.sectionsJson),
+      body: step.body,
+    };
+  }
+  const sectionsB = coerceSections(step.sectionsJsonVariantB);
+  return {
+    subject: step.subjectVariantB!.trim(),
+    sections: sectionsB,
+    body: step.bodyVariantB ?? step.body,
+  };
+}
+
+async function bodyCacheFromStep(
+  step: { body?: string; sectionsJson?: unknown[] | null },
+  productId: number | null | undefined,
+): Promise<string> {
+  const sections = coerceSections(step.sectionsJson);
+  if (sections?.length) {
+    const brand = await loadBrandForProduct(productId ?? undefined);
+    return renderSectionsBodyFragment(sections, brand, appPublicUrl());
+  }
+  return step.body?.trim() ?? "";
 }
 
 async function getSequence(sequenceId: number) {
@@ -179,6 +248,19 @@ async function prepareSequenceSchedule(
     return senderConfigByProduct.get(productId)!;
   };
 
+  const designCtx = await loadSequenceDesignContext({
+    productId: sequence.productId,
+    brandName: sequence.productId
+      ? productMap.get(sequence.productId)?.name
+      : products[0]?.name,
+    sequenceLogoAssetId: sequence.logoAssetId,
+    sequenceDesignTemplateId: sequence.designTemplateId,
+    steps: steps.map((s) => ({ id: s.id, designTemplateId: s.designTemplateId })),
+  });
+
+  const sectionBrand = await loadBrandForProduct(sequence.productId ?? undefined);
+  const origin = appPublicUrl();
+
   const values = [];
   for (const lead of eligibleLeads) {
     const product = (sequence.productId ? productMap.get(sequence.productId) : undefined)
@@ -187,15 +269,35 @@ async function prepareSequenceSchedule(
     const senderConfig = await getSenderConfig(sequence.productId ?? lead.productId ?? null);
     for (const step of steps) {
       const token = createUnsubscribeToken();
+      const abVariant = pickAbVariant(step);
+      const variantContent = stepVariantContent(step, abVariant);
+      const stepSections = variantContent.sections;
+      const rawContent = stepSections?.length
+        ? renderSectionsBodyFragment(stepSections, sectionBrand, origin)
+        : variantContent.body;
+      const contentBody = interpolate(rawContent, lead);
+      const signature = senderConfig.signature ?? product?.emailSignature;
+      const stepShell =
+        (step.designTemplateId && designCtx.stepTemplateShells.get(step.designTemplateId))
+        || designCtx.sequenceTemplateShell;
+      const designedBody = renderSequenceStepBody({
+        ctx: designCtx,
+        stepDesignTemplateId: step.designTemplateId,
+        bodyHtml: contentBody,
+        signatureHtml: signatureContentHtml(signature),
+      });
+      const bodyWithSignature = stepShell?.includes("{{signature}}")
+        ? designedBody
+        : withSignature(designedBody, signature);
       values.push({
         leadId: lead.id,
         templateId: null,
         batchId,
         toAddress: lead.email!,
         fromAddress: senderConfig.from ?? fromAddress(product),
-        subject: interpolate(step.subject, lead),
+        subject: interpolate(variantContent.subject, lead),
         body: appendUnsubscribeFooter(
-          withSignature(interpolate(step.body, lead), senderConfig.signature ?? product?.emailSignature),
+          bodyWithSignature,
           token,
           {
             productName: senderConfig.productName ?? product?.name,
@@ -209,6 +311,7 @@ async function prepareSequenceSchedule(
         scheduledFor: new Date(startDate.getTime() + step.delayDays * 86_400_000),
         sequenceId,
         sequenceStepId: step.id,
+        abVariant,
       });
     }
   }
@@ -257,6 +360,8 @@ router.get("/email-sequences", async (req: Request, res: Response): Promise<void
       name: emailSequencesTable.name,
       description: emailSequencesTable.description,
       productId: emailSequencesTable.productId,
+      logoAssetId: emailSequencesTable.logoAssetId,
+      designTemplateId: emailSequencesTable.designTemplateId,
       productName: productsTable.name,
       createdAt: emailSequencesTable.createdAt,
       updatedAt: emailSequencesTable.updatedAt,
@@ -394,7 +499,13 @@ router.post("/email-sequences/save", async (req: Request, res: Response): Promis
       if (sequenceId) {
         const [updated] = await tx
           .update(emailSequencesTable)
-          .set({ name: data.name, description: data.description ?? null, productId: data.productId ?? null })
+          .set({
+            name: data.name,
+            description: data.description ?? null,
+            productId: data.productId ?? null,
+            logoAssetId: data.logoAssetId === undefined ? undefined : data.logoAssetId,
+            designTemplateId: data.designTemplateId === undefined ? undefined : data.designTemplateId,
+          })
           .where(eq(emailSequencesTable.id, sequenceId))
           .returning();
         if (!updated) throw new Error("Sequence not found");
@@ -402,20 +513,40 @@ router.post("/email-sequences/save", async (req: Request, res: Response): Promis
       } else {
         const [created] = await tx
           .insert(emailSequencesTable)
-          .values({ name: data.name, description: data.description ?? null, productId: data.productId ?? null })
+          .values({
+            name: data.name,
+            description: data.description ?? null,
+            productId: data.productId ?? null,
+            logoAssetId: data.logoAssetId ?? null,
+            designTemplateId: data.designTemplateId ?? null,
+          })
           .returning();
         sequenceId = created.id;
       }
-      const steps = await tx
-        .insert(emailSequenceStepsTable)
-        .values(data.steps.map((step, index) => ({
+      const stepRows = [];
+      for (const step of data.steps) {
+        const body = await bodyCacheFromStep(step, data.productId ?? null);
+        stepRows.push({
           sequenceId: sequenceId!,
-          position: index + 1,
+          position: stepRows.length + 1,
           delayDays: step.delayDays,
           name: step.name ?? null,
           subject: step.subject,
-          body: step.body,
-        })))
+          body: body || step.body || "<p></p>",
+          sectionsJson: step.sectionsJson ?? null,
+          designTemplateId: step.designTemplateId ?? null,
+          abTestEnabled: step.abTestEnabled ?? false,
+          abTestSplitPercent: step.abTestSplitPercent ?? 50,
+          subjectVariantB: step.subjectVariantB ?? null,
+          bodyVariantB: step.bodyVariantB ?? null,
+          sectionsJsonVariantB: step.sectionsJsonVariantB ?? null,
+          resendIfUnopened: step.resendIfUnopened ?? false,
+          resendAfterHours: step.resendAfterHours ?? 48,
+        });
+      }
+      const steps = await tx
+        .insert(emailSequenceStepsTable)
+        .values(stepRows)
         .returning();
       const [sequence] = await tx.select().from(emailSequencesTable).where(eq(emailSequencesTable.id, sequenceId!));
       return { sequence, steps };
@@ -469,6 +600,8 @@ router.patch("/email-sequences/:id", async (req: Request, res: Response): Promis
   if (typeof req.body.name === "string") patch.name = req.body.name.trim();
   if (typeof req.body.description === "string" || req.body.description === null) patch.description = req.body.description?.trim() || null;
   if (Number.isInteger(req.body.productId) || req.body.productId === null) patch.productId = req.body.productId;
+  if (Number.isInteger(req.body.logoAssetId) || req.body.logoAssetId === null) patch.logoAssetId = req.body.logoAssetId;
+  if (Number.isInteger(req.body.designTemplateId) || req.body.designTemplateId === null) patch.designTemplateId = req.body.designTemplateId;
   const [sequence] = await db.update(emailSequencesTable).set(patch).where(eq(emailSequencesTable.id, sequenceId)).returning();
   if (!sequence) {
     res.status(404).json({ error: "Sequence not found" });
@@ -519,17 +652,23 @@ router.post("/email-sequences/:id/steps", async (req: Request, res: Response): P
     res.status(400).json({ error: parsed.success ? "Invalid sequence" : parsed.error.issues[0]?.message });
     return;
   }
-  if (!await getAccessibleSequence(req, sequenceId)) {
+  const sequence = await getAccessibleSequence(req, sequenceId);
+  if (!sequence) {
     res.status(404).json({ error: "Sequence not found or not accessible" });
     return;
   }
+  const body = await bodyCacheFromStep(parsed.data, sequence.productId);
   const [maxPosition] = await db.select({ max: sql<number>`coalesce(max(${emailSequenceStepsTable.position}), 0)::int` })
     .from(emailSequenceStepsTable).where(eq(emailSequenceStepsTable.sequenceId, sequenceId));
   const [step] = await db.insert(emailSequenceStepsTable).values({
-    ...parsed.data,
-    name: parsed.data.name ?? null,
     sequenceId,
     position: (maxPosition?.max ?? 0) + 1,
+    delayDays: parsed.data.delayDays,
+    name: parsed.data.name ?? null,
+    subject: parsed.data.subject,
+    body: body || parsed.data.body || "<p></p>",
+    sectionsJson: parsed.data.sectionsJson ?? null,
+    designTemplateId: parsed.data.designTemplateId ?? null,
   }).returning();
   res.status(201).json(step);
 });
@@ -543,17 +682,26 @@ router.patch("/email-sequences/:id/steps/:stepId", async (req: Request, res: Res
     res.status(400).json({ error: parsed.success ? "Invalid sequence step" : parsed.error.issues[0]?.message });
     return;
   }
-  if (!await getAccessibleSequence(req, sequenceId)) {
+  const sequence = await getAccessibleSequence(req, sequenceId);
+  if (!sequence) {
     res.status(404).json({ error: "Sequence not found or not accessible" });
     return;
   }
-  const [step] = await db.update(emailSequenceStepsTable).set(parsed.data)
+  const [existing] = await db.select().from(emailSequenceStepsTable)
     .where(and(eq(emailSequenceStepsTable.id, stepId), eq(emailSequenceStepsTable.sequenceId, sequenceId)))
-    .returning();
-  if (!step) {
+    .limit(1);
+  if (!existing) {
     res.status(404).json({ error: "Step not found" });
     return;
   }
+  const merged = { ...existing, ...parsed.data };
+  const patch: Partial<typeof emailSequenceStepsTable.$inferInsert> = { ...parsed.data };
+  if (parsed.data.sectionsJson !== undefined || parsed.data.body !== undefined) {
+    patch.body = await bodyCacheFromStep(merged, sequence.productId);
+  }
+  const [step] = await db.update(emailSequenceStepsTable).set(patch)
+    .where(and(eq(emailSequenceStepsTable.id, stepId), eq(emailSequenceStepsTable.sequenceId, sequenceId)))
+    .returning();
   res.json(step);
 });
 

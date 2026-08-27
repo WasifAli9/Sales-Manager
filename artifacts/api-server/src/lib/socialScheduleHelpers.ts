@@ -71,3 +71,17 @@ export function getNextMonthKey(now: Date = new Date()): string {
   const nextM = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   return `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, "0")}`;
 }
+
+// ── Caption cleanup ───────────────────────────────────────────────────────────
+
+/**
+ * Replace em dashes (—) and en dashes (–) with commas so social captions
+ * stay plain and readable. Collapses leftover double commas / spaces.
+ */
+export function sanitizeSocialCaption(text: string): string {
+  return text
+    .replace(/\s*[\u2014\u2013]\s*/g, ", ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

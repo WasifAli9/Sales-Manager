@@ -35,6 +35,8 @@ import productAssetsRouter from "./productAssets";
 import contactListsRouter from "./contactLists";
 import unsubscribeRouter from "./unsubscribe";
 import userProductEmailSettingsRouter from "./userProductEmailSettings";
+import emailBrandTemplatesRouter from "./emailBrandTemplates";
+import emailSectionsRouter from "./emailSections";
 
 const router: IRouter = Router();
 
@@ -74,5 +76,7 @@ router.use(productAssetsRouter);
 router.use(contactListsRouter);
 router.use(unsubscribeRouter);
 router.use(userProductEmailSettingsRouter);
+router.use(emailBrandTemplatesRouter);
+router.use(emailSectionsRouter);
 
 export default router;

@@ -14,6 +14,7 @@ import {
   applyProductResult,
   applyProductFailure,
   getNextMonthKey,
+  sanitizeSocialCaption,
 } from "./socialScheduleHelpers.ts";
 
 // ── evaluateSkipGate ──────────────────────────────────────────────────────────
@@ -171,5 +172,30 @@ describe("getNextMonthKey", () => {
   it("returns a string matching /^\\d{4}-\\d{2}$/", () => {
     const key = getNextMonthKey(new Date("2026-08-16"));
     assert.match(key, /^\d{4}-\d{2}$/);
+  });
+});
+
+// ── sanitizeSocialCaption ─────────────────────────────────────────────────────
+
+describe("sanitizeSocialCaption", () => {
+  it("replaces em dashes with a comma", () => {
+    assert.equal(
+      sanitizeSocialCaption("happier clients—and a clear audit trail"),
+      "happier clients, and a clear audit trail",
+    );
+  });
+
+  it("replaces en dashes with a comma", () => {
+    assert.equal(
+      sanitizeSocialCaption("Faster cover–calmer mornings"),
+      "Faster cover, calmer mornings",
+    );
+  });
+
+  it("leaves captions without dashes unchanged", () => {
+    assert.equal(
+      sanitizeSocialCaption("Replace ring-arounds with one broadcast."),
+      "Replace ring-arounds with one broadcast.",
+    );
   });
 });

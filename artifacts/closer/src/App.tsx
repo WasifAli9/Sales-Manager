@@ -26,6 +26,8 @@ import ProductSectionEmail from "./pages/product-section-email"
 import ProductEmailSequences from "./pages/product-email-sequences"
 import ProductEmailSequenceBuilder from "./pages/product-email-sequence-builder"
 import ProductEmailLists from "./pages/product-email-lists"
+import ProductEmailTemplates from "./pages/product-email-templates"
+import ProductEmailSections from "./pages/product-email-sections"
 import ProductSectionSocial from "./pages/product-section-social"
 import GoalsPage from "./pages/goals"
 import StackPage from "./pages/stack"
@@ -105,6 +107,8 @@ export default function App() {
                   <Route path="/products/:id/email/sequences/:sequenceId" component={ProductEmailSequenceBuilder} />
                   <Route path="/products/:id/email/sequences" component={ProductEmailSequences} />
                   <Route path="/products/:id/email/lists" component={ProductEmailLists} />
+                  <Route path="/products/:id/email/templates" component={ProductEmailTemplates} />
+                  <Route path="/products/:id/email/sections" component={ProductEmailSections} />
                   <Route path="/products/:id/email" component={ProductSectionEmail} />
                   <Route path="/products/:id/social" component={ProductSectionSocial} />
                   <Route path="/goals" component={GoalsPage} />

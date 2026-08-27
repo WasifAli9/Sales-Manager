@@ -36,6 +36,14 @@ export function unsubscribeHeaders(token: string): Record<string, string> {
   };
 }
 
+export function stripUnsubscribeFooter(body: string): string {
+  const marker = 'data-closer-unsubscribe="true"';
+  const idx = body.indexOf(marker);
+  if (idx < 0) return body;
+  const hrIdx = body.lastIndexOf("<hr", idx);
+  return hrIdx >= 0 ? body.slice(0, hrIdx).trimEnd() : body.slice(0, idx).trimEnd();
+}
+
 export function appendUnsubscribeFooter(
   body: string,
   token: string,

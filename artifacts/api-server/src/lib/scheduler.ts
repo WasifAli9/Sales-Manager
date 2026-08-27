@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { logger } from "./logger";
 import { sendPipelineDigest } from "./pipelineDigest";
 import { sendScheduledEmails } from "../routes/emailSends";
+import { scheduleResendForUnopened } from "./resendUnopenedEmails";
 import { postApprovedSocialPosts, autoGenerateMonthlySchedules } from "../routes/socialPosts";
 
 /**
@@ -23,6 +24,10 @@ export function startScheduler(): void {
   // Scheduled lead emails — check every 15 minutes
   cron.schedule("*/15 * * * *", async () => {
     try {
+      const resendResult = await scheduleResendForUnopened();
+      if (resendResult.scheduled > 0) {
+        logger.info(resendResult, "Scheduler: unopened follow-ups scheduled");
+      }
       const result = await sendScheduledEmails();
       if (result.sent > 0 || result.failed > 0) {
         logger.info(result, "Scheduler: scheduled emails processed");

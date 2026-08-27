@@ -7,6 +7,8 @@
  * The real (DB-backed) wiring lives in `../routes/socialPosts.ts`.
  */
 
+import { sanitizeSocialCaption } from "./socialScheduleHelpers";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type ScheduleProduct = {
@@ -114,12 +116,12 @@ export async function generateScheduleForProduct(
     if (p.date < effectiveStart) continue;
     rows.push({
       productId, platform: "instagram", scheduledDate: p.date, status: "pending_approval",
-      theme: p.theme, caption: p.instagram.caption, hashtags: p.instagram.hashtags,
+      theme: p.theme, caption: sanitizeSocialCaption(p.instagram.caption), hashtags: p.instagram.hashtags,
       imagePrompt: p.instagram.imagePrompt, generatedAt: new Date(),
     });
     rows.push({
       productId, platform: "linkedin", scheduledDate: p.date, status: "pending_approval",
-      theme: p.theme, caption: p.linkedin.caption, hashtags: p.linkedin.hashtags,
+      theme: p.theme, caption: sanitizeSocialCaption(p.linkedin.caption), hashtags: p.linkedin.hashtags,
       imagePrompt: p.linkedin.imagePrompt, generatedAt: new Date(),
     });
   }

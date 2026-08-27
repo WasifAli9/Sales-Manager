@@ -20,7 +20,7 @@ export const emailSendsTable = pgTable(
     fromAddress: text("from_address"),
     subject: text("subject").notNull(),
     body: text("body").notNull(),
-    // status: pending | sent | failed | scheduled | cancelled
+    // status: pending | sent | failed | scheduled | paused | cancelled
     status: text("status").notNull().default("pending"),
     resendId: text("resend_id"),
     /** Opaque token for the recipient's one-click unsubscribe link. */
@@ -42,6 +42,10 @@ export const emailSendsTable = pgTable(
     /** Populated when this send was created by a sequence enrollment */
     sequenceId: integer("sequence_id").references(() => emailSequencesTable.id, { onDelete: "set null" }),
     sequenceStepId: integer("sequence_step_id").references(() => emailSequenceStepsTable.id, { onDelete: "set null" }),
+    /** A or B when the step had A/B testing enabled at schedule time. */
+    abVariant: text("ab_variant"),
+    /** Points to the original send when this is an automatic follow-up resend. */
+    resendOfSendId: integer("resend_of_send_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [

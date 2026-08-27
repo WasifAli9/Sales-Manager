@@ -21,6 +21,7 @@ import {
   applyProductResult,
   applyProductFailure,
   getNextMonthKey,
+  sanitizeSocialCaption,
 } from "../lib/socialScheduleHelpers";
 
 // ── Generation progress tracking ──────────────────────────────────────────────
@@ -432,6 +433,7 @@ async function generateContentCalendarEnhanced(
           "Create scroll-stopping, platform-native content. " +
           "Instagram: bold hook in the first line, emojis, story-driven (100-150 chars). " +
           "LinkedIn: authoritative, insight-led, professional tone (150-200 chars). " +
+          "Never use em dashes (—) or en dashes (–) in captions; use commas, periods, or a plain hyphen (-) instead. " +
           "Image prompts must be vivid, detailed descriptions — include style, lighting, mood, composition, and subject. " +
           (styleGuide
             ? "IMPORTANT: every image prompt must faithfully reflect the visual style guide provided by the user. "
@@ -458,6 +460,7 @@ Rules:
 - Create exactly ${dayCount} daily entries, one for each date from START DATE through the last day of that month.
 - Do NOT include any date before START DATE.
 - Dates must be consecutive calendar days starting at START DATE.
+- Never use em dashes (—) or en dashes (–) in captions. Prefer commas or short sentences.
 
 Return JSON:
 {
@@ -573,6 +576,7 @@ async function generateContentCalendar(
           "You are a world-class social media strategist and copywriter. " +
           "Instagram: punchy, visual, story-driven, emojis. " +
           "LinkedIn: professional, insight-driven, thought leadership. " +
+          "Never use em dashes (—) or en dashes (–) in captions; use commas, periods, or a plain hyphen (-) instead. " +
           "Return valid JSON only.",
       },
       {
@@ -589,6 +593,7 @@ DAY COUNT: ${dayCount}
 Rules:
 - Create exactly ${dayCount} daily entries from START DATE through month end.
 - Do NOT include any date before START DATE.
+- Never use em dashes (—) or en dashes (–) in captions. Prefer commas or short sentences.
 
 Return JSON: {
   "posts": [
@@ -1337,13 +1342,13 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
         rows.push({
           productId, platform: "instagram",
           scheduledDate: p.date, status: "pending_approval",
-          theme: p.theme, caption: p.instagram.caption, hashtags: p.instagram.hashtags,
+          theme: p.theme, caption: sanitizeSocialCaption(p.instagram.caption), hashtags: p.instagram.hashtags,
           imagePrompt: p.instagram.imagePrompt, generatedAt: new Date(),
         });
         rows.push({
           productId, platform: "linkedin",
           scheduledDate: p.date, status: "pending_approval",
-          theme: p.theme, caption: p.linkedin.caption, hashtags: p.linkedin.hashtags,
+          theme: p.theme, caption: sanitizeSocialCaption(p.linkedin.caption), hashtags: p.linkedin.hashtags,
           imagePrompt: p.linkedin.imagePrompt, generatedAt: new Date(),
         });
       }
@@ -1510,7 +1515,10 @@ router.put("/social-posts/:id", async (req, res) => {
     const { caption, hashtags, videoUrl } = req.body as {
       caption: string; hashtags: string; videoUrl?: string | null;
     };
-    const updates: Partial<typeof socialPostsTable.$inferInsert> = { caption, hashtags };
+    const updates: Partial<typeof socialPostsTable.$inferInsert> = {
+      caption: sanitizeSocialCaption(caption),
+      hashtags,
+    };
     if (videoUrl !== undefined) updates.videoUrl = videoUrl ?? null;
     const [post] = await db
       .update(socialPostsTable)
@@ -1591,7 +1599,12 @@ router.post("/social-posts/:id/regenerate", async (req, res) => {
     const response = await openai.chat.completions.create({
       model: "gpt-5",
       messages: [
-        { role: "system", content: "You are a social media copywriter. Return valid JSON only." },
+        {
+          role: "system",
+          content:
+            "You are a social media copywriter. Return valid JSON only. " +
+            "Never use em dashes (—) or en dashes (–) in captions; use commas, periods, or a plain hyphen (-) instead.",
+        },
         {
           role: "user",
           content: `Regenerate a fresh ${existing.platform} post.
@@ -1600,7 +1613,8 @@ TOPIC / THEME: ${effectiveTheme}
 DATE: ${existing.scheduledDate}
 
 Return JSON: { "theme": "...", "caption": "...", "hashtags": "...", "imagePrompt": "..." }
-${existing.platform === "instagram" ? "Caption: punchy, emoji-rich, 100-150 chars." : "Caption: professional insight-led, 150-200 chars."}`,
+${existing.platform === "instagram" ? "Caption: punchy, emoji-rich, 100-150 chars." : "Caption: professional insight-led, 150-200 chars."}
+Do not use em dashes (—) or en dashes (–) in the caption.`,
         },
       ],
       response_format: { type: "json_object" },
@@ -1615,7 +1629,7 @@ ${existing.platform === "instagram" ? "Caption: punchy, emoji-rich, 100-150 char
       .update(socialPostsTable)
       .set({
         theme:        parsed.theme        ?? effectiveTheme,
-        caption:      parsed.caption      ?? existing.caption,
+        caption:      sanitizeSocialCaption(parsed.caption ?? existing.caption ?? ""),
         hashtags:     parsed.hashtags     ?? existing.hashtags,
         imagePrompt:  parsed.imagePrompt  ?? existing.imagePrompt,
         imageUrl:     null,

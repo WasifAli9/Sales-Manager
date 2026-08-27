@@ -1,15 +1,23 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { randomUUID } from "crypto";
 import { db } from "@workspace/db";
-import { contactListsTable, emailCampaignsTable, emailSendsTable, emailSequencesTable, leadsTable } from "@workspace/db/schema";
+import {
+  contactListsTable,
+  emailCampaignsTable,
+  emailSendsTable,
+  emailSequencesTable,
+  emailSequenceStepsTable,
+  leadsTable,
+  emailTemplatesTable,
+} from "@workspace/db/schema";
 import { eq, and, lte, gte, inArray, isNotNull, sql, desc, min, max } from "drizzle-orm";
-import { emailTemplatesTable } from "@workspace/db/schema";
 import { sendEmail, interpolate, salesFromEmail, type EmailAttachment } from "../lib/email";
 import { logger } from "../lib/logger";
 import { validateScheduledFor } from "../lib/validateScheduledFor";
 import { canAccessProduct } from "../lib/productAccess";
 import { appendUnsubscribeFooter, createUnsubscribeToken, unsubscribeHeaders } from "../lib/unsubscribe";
 import { resolveSenderEmailConfig, type SenderEmailConfig } from "../lib/resolveSenderEmailConfig";
+import { appendSignatureHtml } from "../lib/emailSignatureHtml";
 
 type ProductConfig = SenderEmailConfig;
 
@@ -458,10 +466,48 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
   res.json({ scheduled, skipped, duplicates, unsubscribed, batchId });
 });
 
+function ratePct(numerator: number, denominator: number): number {
+  return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : 0;
+}
+
+function deriveCampaignLifecycle(counts: {
+  scheduled: number;
+  paused: number;
+  sent: number;
+  failed: number;
+  cancelled: number;
+  total: number;
+}): "active" | "paused" | "stopped" | "completed" {
+  if (counts.paused > 0 && counts.scheduled === 0) return "paused";
+  if (counts.scheduled > 0 || counts.paused > 0) return "active";
+  if (counts.cancelled > 0 && counts.sent === 0 && counts.failed === 0) return "stopped";
+  if (counts.cancelled > 0 && counts.scheduled === 0 && counts.paused === 0) {
+    // Stopped mid-flight if anything was cancelled while some already went out
+    if (counts.sent + counts.failed < counts.total) return "stopped";
+  }
+  return "completed";
+}
+
 // ── List campaigns (grouped bulk sends) ────────────────────────────────────
-// GET /api/email-campaigns
+// GET /api/email-campaigns?productId=&sequenceOnly=1
 router.get("/email-campaigns", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
+
+  const productIdRaw = typeof req.query.productId === "string" ? parseInt(req.query.productId, 10) : NaN;
+  const productId = Number.isInteger(productIdRaw) && productIdRaw > 0 ? productIdRaw : null;
+  const sequenceOnly =
+    req.query.sequenceOnly === "1" ||
+    req.query.sequenceOnly === "true" ||
+    productId !== null;
+
+  if (productId !== null && !(await canAccessProduct(req, productId))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const whereParts = [isNotNull(emailSendsTable.batchId)];
+  if (sequenceOnly) whereParts.push(isNotNull(emailSendsTable.sequenceId));
+  if (productId !== null) whereParts.push(eq(emailSequencesTable.productId, productId));
 
   const rows = await db
     .select({
@@ -469,9 +515,12 @@ router.get("/email-campaigns", async (req: Request, res: Response) => {
       templateId: emailSendsTable.templateId,
       templateName: emailTemplatesTable.name,
       campaignName: emailCampaignsTable.name,
+      sequenceId: emailSendsTable.sequenceId,
+      sequenceName: emailSequencesTable.name,
       subject: sql<string>`min(${emailSendsTable.subject})`,
       total:     sql<number>`cast(count(*) as int)`,
       scheduled: sql<number>`cast(sum(case when ${emailSendsTable.status} = 'scheduled' then 1 else 0 end) as int)`,
+      paused:    sql<number>`cast(sum(case when ${emailSendsTable.status} = 'paused' then 1 else 0 end) as int)`,
       sent:      sql<number>`cast(sum(case when ${emailSendsTable.status} = 'sent' then 1 else 0 end) as int)`,
       failed:    sql<number>`cast(sum(case when ${emailSendsTable.status} = 'failed' then 1 else 0 end) as int)`,
       cancelled: sql<number>`cast(sum(case when ${emailSendsTable.status} = 'cancelled' then 1 else 0 end) as int)`,
@@ -486,8 +535,16 @@ router.get("/email-campaigns", async (req: Request, res: Response) => {
     .from(emailSendsTable)
     .leftJoin(emailTemplatesTable, eq(emailSendsTable.templateId, emailTemplatesTable.id))
     .leftJoin(emailCampaignsTable, eq(emailSendsTable.batchId, emailCampaignsTable.batchId))
-    .where(isNotNull(emailSendsTable.batchId))
-    .groupBy(emailSendsTable.batchId, emailSendsTable.templateId, emailTemplatesTable.name, emailCampaignsTable.name)
+    .leftJoin(emailSequencesTable, eq(emailSendsTable.sequenceId, emailSequencesTable.id))
+    .where(and(...whereParts))
+    .groupBy(
+      emailSendsTable.batchId,
+      emailSendsTable.templateId,
+      emailTemplatesTable.name,
+      emailCampaignsTable.name,
+      emailSendsTable.sequenceId,
+      emailSequencesTable.name,
+    )
     .orderBy(desc(min(emailSendsTable.createdAt)));
 
   const visibleRows = req.user!.role === "owner"
@@ -500,18 +557,29 @@ router.get("/email-campaigns", async (req: Request, res: Response) => {
     const delivered = Number(row.delivered ?? 0);
     const opened = Number(row.opened ?? 0);
     const clicked = Number(row.clicked ?? 0);
-    const percentage = (numerator: number, denominator: number) =>
-      denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : 0;
+    const scheduled = Number(row.scheduled ?? 0);
+    const paused = Number(row.paused ?? 0);
+    const sent = Number(row.sent ?? 0);
+    const failed = Number(row.failed ?? 0);
+    const cancelled = Number(row.cancelled ?? 0);
+    const total = Number(row.total ?? 0);
 
     return {
       ...row,
+      scheduled,
+      paused,
+      sent,
+      failed,
+      cancelled,
+      total,
       delivered,
       opened,
       clicked,
       bounced: Number(row.bounced ?? 0),
-      openRate: percentage(opened, delivered),
-      clickThroughRate: percentage(clicked, delivered),
-      clickToOpenRate: percentage(clicked, opened),
+      openRate: ratePct(opened, delivered),
+      clickThroughRate: ratePct(clicked, delivered),
+      clickToOpenRate: ratePct(clicked, opened),
+      lifecycle: deriveCampaignLifecycle({ scheduled, paused, sent, failed, cancelled, total }),
     };
   }));
 });
@@ -560,7 +628,103 @@ router.get("/email-campaigns/:batchId", async (req: Request, res: Response) => {
   res.json(sends);
 });
 
-// ── Cancel a pending campaign ───────────────────────────────────────────────
+// ── Per-step stats for a sequence campaign ──────────────────────────────────
+// GET /api/email-campaigns/:batchId/steps
+router.get("/email-campaigns/:batchId/steps", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const batchId = String(req.params.batchId);
+  if (!await canAccessCampaign(req, batchId)) {
+    res.status(404).json({ error: "Campaign not found" });
+    return;
+  }
+
+  const rows = await db
+    .select({
+      sequenceStepId: emailSendsTable.sequenceStepId,
+      position: emailSequenceStepsTable.position,
+      stepName: emailSequenceStepsTable.name,
+      subject: sql<string>`coalesce(min(${emailSequenceStepsTable.subject}), min(${emailSendsTable.subject}))`,
+      total:     sql<number>`cast(count(*) as int)`,
+      scheduled: sql<number>`cast(sum(case when ${emailSendsTable.status} = 'scheduled' then 1 else 0 end) as int)`,
+      paused:    sql<number>`cast(sum(case when ${emailSendsTable.status} = 'paused' then 1 else 0 end) as int)`,
+      sent:      sql<number>`cast(sum(case when ${emailSendsTable.status} = 'sent' then 1 else 0 end) as int)`,
+      failed:    sql<number>`cast(sum(case when ${emailSendsTable.status} = 'failed' then 1 else 0 end) as int)`,
+      cancelled: sql<number>`cast(sum(case when ${emailSendsTable.status} = 'cancelled' then 1 else 0 end) as int)`,
+      delivered: sql<number>`cast(sum(case when ${emailSendsTable.deliveredAt} is not null then 1 else 0 end) as int)`,
+      opened: sql<number>`cast(sum(case when ${emailSendsTable.openedAt} is not null then 1 else 0 end) as int)`,
+      clicked: sql<number>`cast(sum(case when ${emailSendsTable.clickedAt} is not null then 1 else 0 end) as int)`,
+      bounced: sql<number>`cast(sum(case when ${emailSendsTable.bouncedAt} is not null then 1 else 0 end) as int)`,
+    })
+    .from(emailSendsTable)
+    .leftJoin(emailSequenceStepsTable, eq(emailSendsTable.sequenceStepId, emailSequenceStepsTable.id))
+    .where(eq(emailSendsTable.batchId, batchId))
+    .groupBy(
+      emailSendsTable.sequenceStepId,
+      emailSequenceStepsTable.position,
+      emailSequenceStepsTable.name,
+    )
+    .orderBy(sql`coalesce(${emailSequenceStepsTable.position}, 9999)`);
+
+  res.json(rows.map((row) => {
+    const delivered = Number(row.delivered ?? 0);
+    const opened = Number(row.opened ?? 0);
+    const clicked = Number(row.clicked ?? 0);
+    return {
+      ...row,
+      delivered,
+      opened,
+      clicked,
+      bounced: Number(row.bounced ?? 0),
+      scheduled: Number(row.scheduled ?? 0),
+      paused: Number(row.paused ?? 0),
+      sent: Number(row.sent ?? 0),
+      failed: Number(row.failed ?? 0),
+      cancelled: Number(row.cancelled ?? 0),
+      total: Number(row.total ?? 0),
+      openRate: ratePct(opened, delivered),
+      clickThroughRate: ratePct(clicked, delivered),
+      clickToOpenRate: ratePct(clicked, opened),
+    };
+  }));
+});
+
+// ── Pause remaining scheduled sends ─────────────────────────────────────────
+// POST /api/email-campaigns/:batchId/pause
+router.post("/email-campaigns/:batchId/pause", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const batchId = String(req.params.batchId);
+  if (!await canAccessCampaign(req, batchId)) {
+    res.status(404).json({ error: "Campaign not found" });
+    return;
+  }
+  const result = await db
+    .update(emailSendsTable)
+    .set({ status: "paused", errorMessage: null })
+    .where(and(eq(emailSendsTable.batchId, batchId), eq(emailSendsTable.status, "scheduled")))
+    .returning({ id: emailSendsTable.id });
+
+  res.json({ paused: result.length });
+});
+
+// ── Resume paused sends ─────────────────────────────────────────────────────
+// POST /api/email-campaigns/:batchId/resume
+router.post("/email-campaigns/:batchId/resume", async (req: Request, res: Response) => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
+  const batchId = String(req.params.batchId);
+  if (!await canAccessCampaign(req, batchId)) {
+    res.status(404).json({ error: "Campaign not found" });
+    return;
+  }
+  const result = await db
+    .update(emailSendsTable)
+    .set({ status: "scheduled", errorMessage: null })
+    .where(and(eq(emailSendsTable.batchId, batchId), eq(emailSendsTable.status, "paused")))
+    .returning({ id: emailSendsTable.id });
+
+  res.json({ resumed: result.length });
+});
+
+// ── Stop / cancel remaining scheduled + paused sends ────────────────────────
 // DELETE /api/email-campaigns/:batchId
 router.delete("/email-campaigns/:batchId", async (req: Request, res: Response) => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
@@ -571,11 +735,11 @@ router.delete("/email-campaigns/:batchId", async (req: Request, res: Response) =
   }
   const result = await db
     .update(emailSendsTable)
-    .set({ status: "cancelled", errorMessage: "Cancelled by user" })
+    .set({ status: "cancelled", errorMessage: "Stopped by user" })
     .where(
       and(
         eq(emailSendsTable.batchId, batchId),
-        eq(emailSendsTable.status, "scheduled"),
+        inArray(emailSendsTable.status, ["scheduled", "paused"]),
       ),
     )
     .returning({ id: emailSendsTable.id });
@@ -765,10 +929,8 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
   return { sent, failed, skipped };
 }
 
-/** Append a plain-text signature to a body, separated by a line. */
 function appendSignature(body: string, signature: string | undefined): string {
-  if (!signature?.trim()) return body;
-  return `${body}\n\n--\n${signature.trim()}`;
+  return appendSignatureHtml(body, signature);
 }
 
 // ── Wrap plain text / partial HTML in a branded shell ──────────────────────

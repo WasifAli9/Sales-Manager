@@ -171,6 +171,8 @@ interface RichTextEditorProps {
   minHeight?: number
   /** Variable chips to insert (e.g. "{{firstName}}") */
   variables?: string[]
+  /** When set, shows an Insert logo toolbar button that embeds this image URL. */
+  logoUrl?: string | null
   className?: string
 }
 
@@ -180,6 +182,7 @@ export function RichTextEditor({
   placeholder = "Write your message…",
   minHeight = 180,
   variables,
+  logoUrl,
   className,
 }: RichTextEditorProps) {
   const [showLink, setShowLink] = useState(false)
@@ -404,6 +407,23 @@ export function RichTextEditor({
             </div>
           )}
         </div>
+
+        {logoUrl && (
+          <ToolBtn
+            onClick={() => {
+              editor
+                .chain()
+                .focus()
+                .insertContent(
+                  `<div data-sequence-logo="1"><img src="${logoUrl.replace(/"/g, "&quot;")}" alt="Logo" width="120" /></div><p></p>`,
+                )
+                .run()
+            }}
+            title="Insert sequence logo"
+          >
+            <span className="text-[10px] font-semibold tracking-wide">LOGO</span>
+          </ToolBtn>
+        )}
       </div>
 
       {/* Editor area */}
