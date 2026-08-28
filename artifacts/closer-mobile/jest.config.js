@@ -30,6 +30,6 @@ module.exports = {
     '^test-renderer$': 'react-test-renderer',
     '^@/(.*)$': '<rootDir>/$1',
     '^@workspace/api-client-react$':
-      '<rootDir>/__mocks__/@workspace/api-client-react.ts',
+      '<rootDir>/__mocks__/@workspace/api-client-react.js',
   },
 };
