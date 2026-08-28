@@ -28,6 +28,10 @@ import ProductEmailSequenceBuilder from "./pages/product-email-sequence-builder"
 import ProductEmailLists from "./pages/product-email-lists"
 import ProductEmailTemplates from "./pages/product-email-templates"
 import ProductEmailSections from "./pages/product-email-sections"
+import ProductLeadIntelligence from "./pages/product-lead-intelligence"
+import ProductAiInbox from "./pages/product-ai-inbox"
+import ProductOpportunityDetail from "./pages/product-opportunity-detail"
+import ProductMyActions from "./pages/product-my-actions"
 import ProductSectionSocial from "./pages/product-section-social"
 import GoalsPage from "./pages/goals"
 import StackPage from "./pages/stack"
@@ -109,6 +113,10 @@ export default function App() {
                   <Route path="/products/:id/email/lists" component={ProductEmailLists} />
                   <Route path="/products/:id/email/templates" component={ProductEmailTemplates} />
                   <Route path="/products/:id/email/sections" component={ProductEmailSections} />
+                  <Route path="/products/:id/lead-intelligence" component={ProductLeadIntelligence} />
+                  <Route path="/products/:id/ai-inbox" component={ProductAiInbox} />
+                  <Route path="/products/:id/opportunities/:dealId" component={ProductOpportunityDetail} />
+                  <Route path="/products/:id/my-actions" component={ProductMyActions} />
                   <Route path="/products/:id/email" component={ProductSectionEmail} />
                   <Route path="/products/:id/social" component={ProductSectionSocial} />
                   <Route path="/goals" component={GoalsPage} />

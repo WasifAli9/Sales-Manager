@@ -37,6 +37,10 @@ export const leadsTable = pgTable("leads", {
   address: text("address"),
   apolloId: text("apollo_id"),
   status: text("status").notNull().default("new"),
+  /** FK to companies after Apollo normalize/dedupe. */
+  companyId: integer("company_id"),
+  /** queued | researching | scored | failed | skipped | null */
+  researchStatus: text("research_status"),
   lastActionType: text("last_action_type"),
   lastActionNote: text("last_action_note"),
   lastActionAt: timestamp("last_action_at", { withTimezone: true }),

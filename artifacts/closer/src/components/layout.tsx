@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/sheet";
 
 const NAV_TABS = [
-  { name: "Today", path: "/", icon: LayoutDashboard },
+  { name: "My Day", path: "/", icon: LayoutDashboard },
   { name: "Products", path: "/products", icon: Package },
   { name: "Leads", path: "/leads", icon: Users },
   { name: "Goals", path: "/goals", icon: Target },

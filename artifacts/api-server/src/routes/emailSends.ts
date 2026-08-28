@@ -18,6 +18,7 @@ import { canAccessProduct } from "../lib/productAccess";
 import { appendUnsubscribeFooter, createUnsubscribeToken, unsubscribeHeaders } from "../lib/unsubscribe";
 import { resolveSenderEmailConfig, type SenderEmailConfig } from "../lib/resolveSenderEmailConfig";
 import { appendSignatureHtml } from "../lib/emailSignatureHtml";
+import { inboundReplyToAddress } from "../lib/reply-agent/helpers";
 
 type ProductConfig = SenderEmailConfig;
 
@@ -240,13 +241,20 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     return;
   }
 
+  const replyTo = inboundReplyToAddress(send.id);
+  const replyToToken = replyTo ? `s${send.id}` : null;
+  const rfcMessageId = `<sm-send-${send.id}@salesmanager.local>`;
   const result = await sendEmail({
     to: lead.email,
     subject: resolvedSubject,
     html: wrapHtml(bodyWithControls),
     attachments,
       from: productConfig.from,
-    headers: unsubscribeHeaders(token),
+    replyTo: replyTo ?? undefined,
+    headers: {
+      ...unsubscribeHeaders(token),
+      "Message-ID": rfcMessageId,
+    },
   });
   const resendId = result.ok ? result.id : null;
 
@@ -255,6 +263,8 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     .set({
       status: resendId ? "sent" : "failed",
       resendId: resendId ?? null,
+      replyToToken,
+      rfcMessageId,
       sentAt: resendId ? new Date() : null,
       errorMessage: resendId ? null : (result.ok ? "Resend returned no ID" : result.error),
     })
@@ -874,19 +884,32 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
         .set({ unsubscribeToken: token, body })
       .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")));
     }
+    const replyTo = inboundReplyToAddress(send.id);
+    const replyToToken = replyTo ? `s${send.id}` : null;
+    const rfcMessageId = `<sm-send-${send.id}@salesmanager.local>`;
     const result = await sendEmail({
       to: send.toAddress,
       subject: send.subject,
       html: wrapHtml(body),
       from: send.fromAddress ?? salesFromEmail(),
-      headers: unsubscribeHeaders(token),
+      replyTo: replyTo ?? undefined,
+      headers: {
+        ...unsubscribeHeaders(token),
+        "Message-ID": rfcMessageId,
+      },
     });
     const resendId = result.ok ? result.id : null;
 
     if (resendId) {
       const [sentUpdate] = await db
         .update(emailSendsTable)
-        .set({ status: "sent", resendId, sentAt: new Date() })
+        .set({
+          status: "sent",
+          resendId,
+          replyToToken,
+          rfcMessageId,
+          sentAt: new Date(),
+        })
         .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")))
         .returning({ id: emailSendsTable.id });
       if (!sentUpdate) {

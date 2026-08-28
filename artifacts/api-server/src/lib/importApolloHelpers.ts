@@ -67,6 +67,18 @@ export function mapApolloRow(row: Record<string, string>) {
     tiktokUrl: get("TikTok", "TikTok URL", "tiktok_url", "TikTok Url"),
     address: get("Address", "address", "Location", "City", "Company Address"),
     apolloId: get("Apollo Contact Id", "Contact Id", "ID", "id"),
+    website: get("Website", "Company Website", "website", "Company Domain", "Domain"),
+    industry: get("Industry", "Company Industry", "industry"),
+    employeeCount: get("# Employees", "Employees", "Employee Count", "Company Size", "employees"),
+    location: get(
+      "Company Country",
+      "Country",
+      "Company City",
+      "City",
+      "Company State",
+      "State",
+      "Location",
+    ),
   };
 }
 

@@ -4,9 +4,49 @@ import { leadsTable, productsTable, emailSendsTable, leadTagsTable, leadTagAssig
 import { eq, ilike, or, and, inArray, sql } from "drizzle-orm";
 import { requireOwner } from "../middlewares/requireOwner";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { parseCSV, mapApolloRow, runImportApollo } from "../lib/importApolloHelpers";
+import { parseCSV, mapApolloRow, runImportApollo, type MappedRow } from "../lib/importApolloHelpers";
+import { findOrCreateCompany, enqueueCompanyResearch, writeAudit } from "../lib/lead-intelligence/companyService";
 
 const router: IRouter = Router();
+
+function leadFieldsFromMapped(data: MappedRow) {
+  return {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    email: data.email,
+    company: data.company,
+    title: data.title,
+    phone: data.phone,
+    linkedinUrl: data.linkedinUrl,
+    companyLinkedinUrl: data.companyLinkedinUrl,
+    instagramUrl: data.instagramUrl,
+    facebookUrl: data.facebookUrl,
+    tiktokUrl: data.tiktokUrl,
+    address: data.address,
+    apolloId: data.apolloId,
+  };
+}
+
+async function linkLeadToCompany(
+  leadId: number,
+  productId: number | null,
+  data: MappedRow,
+  companyIdsTouched: Set<number>,
+) {
+  if (!productId || !data.company?.trim()) return;
+  const { company } = await findOrCreateCompany(productId, {
+    name: data.company,
+    website: data.website,
+    industry: data.industry,
+    employeeCount: data.employeeCount,
+    location: data.location ?? data.address,
+  });
+  await db
+    .update(leadsTable)
+    .set({ companyId: company.id, researchStatus: "queued" })
+    .where(eq(leadsTable.id, leadId));
+  companyIdsTouched.add(company.id);
+}
 
 type TagSummary = { id: number; name: string };
 
@@ -263,9 +303,11 @@ router.post("/leads/import-apollo", requireOwner, async (req: Request, res: Resp
   };
 
   try {
+    const companyIdsTouched = new Set<number>();
+
     const result = await runImportApollo(mapped, {
       upsertByApolloId: async (data) => {
-        const rowData = { ...data, ...(pid !== null ? { productId: pid } : {}), leadType: lt };
+        const rowData = { ...leadFieldsFromMapped(data), ...(pid !== null ? { productId: pid } : {}), leadType: lt };
         const existing = await db
           .select()
           .from(leadsTable)
@@ -274,15 +316,17 @@ router.post("/leads/import-apollo", requireOwner, async (req: Request, res: Resp
         if (existing.length) {
           await db.update(leadsTable).set(rowData).where(eq(leadsTable.apolloId, data.apolloId!));
           await addTagsToLead(existing[0].id, tagIds);
+          await linkLeadToCompany(existing[0].id, pid, data, companyIdsTouched);
           return { isNew: false };
         }
         const [created] = await db.insert(leadsTable).values(rowData).returning({ id: leadsTable.id });
         await addTagsToLead(created.id, tagIds);
+        await linkLeadToCompany(created.id, pid, data, companyIdsTouched);
         return { isNew: true };
       },
 
       upsertByEmail: async (data) => {
-        const rowData = { ...data, ...(pid !== null ? { productId: pid } : {}), leadType: lt };
+        const rowData = { ...leadFieldsFromMapped(data), ...(pid !== null ? { productId: pid } : {}), leadType: lt };
         const existing = await db
           .select()
           .from(leadsTable)
@@ -291,16 +335,18 @@ router.post("/leads/import-apollo", requireOwner, async (req: Request, res: Resp
         if (existing.length) {
           await db.update(leadsTable).set(rowData).where(eq(leadsTable.email, data.email!));
           await addTagsToLead(existing[0].id, tagIds);
+          await linkLeadToCompany(existing[0].id, pid, data, companyIdsTouched);
           return { isNew: false };
         }
         const [created] = await db.insert(leadsTable).values(rowData).returning({ id: leadsTable.id });
         await addTagsToLead(created.id, tagIds);
+        await linkLeadToCompany(created.id, pid, data, companyIdsTouched);
         return { isNew: true };
       },
 
       batchInsert: async (rows) => {
         const batch = rows.map(data => ({
-          ...data,
+          ...leadFieldsFromMapped(data),
           ...(pid !== null ? { productId: pid } : {}),
           leadType: lt,
         }));
@@ -308,6 +354,11 @@ router.post("/leads/import-apollo", requireOwner, async (req: Request, res: Resp
         if (tagIds.length && inserted.length) {
           await db.insert(leadTagAssignmentsTable)
             .values(inserted.flatMap((lead) => tagIds.map((tagId) => ({ leadId: lead.id, tagId }))));
+        }
+        if (pid != null) {
+          for (let i = 0; i < inserted.length; i++) {
+            await linkLeadToCompany(inserted[i].id, pid, rows[i], companyIdsTouched);
+          }
         }
         return inserted.length;
       },
@@ -317,7 +368,31 @@ router.post("/leads/import-apollo", requireOwner, async (req: Request, res: Resp
       },
     });
 
-    sendEvent({ type: "done", imported: result.imported, updated: result.updated });
+    let jobsQueued = 0;
+    if (pid != null) {
+      for (const companyId of companyIdsTouched) {
+        const job = await enqueueCompanyResearch(pid, companyId);
+        if (job) jobsQueued++;
+      }
+      await writeAudit({
+        productId: pid,
+        eventType: "apollo_import_complete",
+        payload: {
+          imported: result.imported,
+          updated: result.updated,
+          companies: companyIdsTouched.size,
+          jobsQueued,
+        },
+      });
+    }
+
+    sendEvent({
+      type: "done",
+      imported: result.imported,
+      updated: result.updated,
+      companies: companyIdsTouched.size,
+      researchJobsQueued: jobsQueued,
+    });
   } catch (err) {
     sendEvent({ type: "error", message: String(err) });
   } finally {

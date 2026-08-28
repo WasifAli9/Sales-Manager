@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Resend } from "resend";
 import { eq, sql } from "drizzle-orm";
 import { db, emailSendsTable, emailTrackingEventsTable } from "@workspace/db";
+import { handleInboundReceived } from "../lib/reply-agent/inbound";
 
 function getResend(): Resend | null {
   const key = process.env.RESEND_API_KEY?.trim();
@@ -22,6 +23,11 @@ interface WebhookEmailData {
   email_id?: string;
   click?: { link?: string };
   bounce?: { type?: string; subType?: string; message?: string };
+  from?: string;
+  to?: string[];
+  subject?: string;
+  message_id?: string;
+  created_at?: string;
 }
 
 function eventDate(createdAt: string): Date {
@@ -30,7 +36,7 @@ function eventDate(createdAt: string): Date {
 }
 
 /**
- * Receives Resend's signed delivery/engagement events.
+ * Receives Resend's signed delivery/engagement events and inbound email.received.
  * This handler must be registered ahead of express.json() so the SDK can
  * verify the exact bytes Resend signed.
  */
@@ -71,6 +77,25 @@ export async function handleResendWebhook(req: Request, res: Response): Promise<
     return;
   }
 
+  if (event.type === "email.received") {
+    try {
+      const result = await handleInboundReceived({
+        email_id: event.data.email_id,
+        from: event.data.from,
+        to: event.data.to,
+        subject: event.data.subject,
+        message_id: event.data.message_id,
+        created_at: event.data.created_at ?? event.created_at,
+      });
+      req.log.info({ ...result, providerEventId: svixId }, "Resend inbound email processed");
+      res.status(200).json({ received: true, ...result });
+    } catch (err) {
+      req.log.error({ err, providerEventId: svixId }, "Resend inbound processing failed");
+      res.status(503).json({ error: "Inbound processing failed; retry shortly" });
+    }
+    return;
+  }
+
   if (!TRACKED_EVENT_TYPES.has(event.type)) {
     res.sendStatus(204);
     return;
@@ -91,14 +116,9 @@ export async function handleResendWebhook(req: Request, res: Response): Promise<
     .where(eq(emailSendsTable.resendId, resendId))
     .limit(1);
 
-  // The event may refer to an unrelated Resend email sent outside Closer.
-  // Acknowledge it so Resend does not retry it, but never create orphan data.
   if (!send) {
     const eventAgeMs = Date.now() - occurredAt.getTime();
     if (eventAgeMs < SEND_MAPPING_RETRY_WINDOW_MS) {
-      // A delivery event can arrive before the immediate-send path persists
-      // the Resend message ID. Returning 5xx asks Resend to retry instead of
-      // permanently losing a legitimate event in that short mapping window.
       req.log.warn(
         { eventType: event.type, providerEventId: svixId, resendId },
         "Resend email event arrived before send mapping was available",

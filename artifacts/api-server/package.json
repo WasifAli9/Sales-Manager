@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps --env-file=../../.env ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/validateScheduledFor.test.ts src/lib/validateCampaignLaunch.test.ts src/lib/socialScheduleHelpers.test.ts src/lib/strategyDocument.test.ts src/routes/generateScheduleForProduct.test.ts src/lib/importApolloHelpers.test.ts && node ./testTagAudience.mjs && node ./testOutreachSafety.mjs",
+    "test": "node --experimental-strip-types --test src/lib/validateScheduledFor.test.ts src/lib/validateCampaignLaunch.test.ts src/lib/socialScheduleHelpers.test.ts src/lib/strategyDocument.test.ts src/routes/generateScheduleForProduct.test.ts src/lib/importApolloHelpers.test.ts src/lib/lead-intelligence/scoring.test.ts src/lib/founder-planner/scoring.test.ts && node ./testTagAudience.mjs && node ./testOutreachSafety.mjs",
     "test:social": "node --experimental-strip-types --test src/lib/socialScheduleHelpers.test.ts"
   },
   "dependencies": {

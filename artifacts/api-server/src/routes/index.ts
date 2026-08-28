@@ -37,6 +37,10 @@ import unsubscribeRouter from "./unsubscribe";
 import userProductEmailSettingsRouter from "./userProductEmailSettings";
 import emailBrandTemplatesRouter from "./emailBrandTemplates";
 import emailSectionsRouter from "./emailSections";
+import leadIntelligenceRouter from "./leadIntelligence";
+import replyAgentRouter from "./replyAgent";
+import opportunityAgentRouter from "./opportunityAgent";
+import founderPlannerRouter from "./founderPlanner";
 
 const router: IRouter = Router();
 
@@ -78,5 +82,9 @@ router.use(unsubscribeRouter);
 router.use(userProductEmailSettingsRouter);
 router.use(emailBrandTemplatesRouter);
 router.use(emailSectionsRouter);
+router.use(leadIntelligenceRouter);
+router.use(replyAgentRouter);
+router.use(opportunityAgentRouter);
+router.use(founderPlannerRouter);
 
 export default router;

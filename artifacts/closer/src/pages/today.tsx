@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useState, Component, type ReactNode, useEffect, useRef } from "react"
 import { getTodayStr } from "@/lib/date"
 import { HealthVisionFlash } from "@/components/health-vision-flash"
+import { MyDayCommandCentre } from "@/components/my-day-command-centre"
 
 /** Silent boundary — if CourageBar throws for any reason, just hide it. */
 class CourageBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -91,7 +92,7 @@ export default function TodayPage() {
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">
-            {format(new Date(), "EEEE, MMM d")}
+            My Day · {format(new Date(), "EEEE, MMM d")}
           </h1>
           {sumData?.coachPush && (
             <p className="text-sm font-medium text-muted-foreground mt-1">
@@ -117,6 +118,9 @@ export default function TodayPage() {
           onNavigateToPipeline={undefined}
         />
       </CourageBoundary>
+
+      {/* AI Founder Daily Planner — primary command centre */}
+      <MyDayCommandCentre />
 
       {/* Focus Guard */}
       {sumData?.focusGuard && (

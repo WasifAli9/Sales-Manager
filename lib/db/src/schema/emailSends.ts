@@ -23,6 +23,10 @@ export const emailSendsTable = pgTable(
     // status: pending | sent | failed | scheduled | paused | cancelled
     status: text("status").notNull().default("pending"),
     resendId: text("resend_id"),
+    /** RFC Message-ID from provider / headers for inbound thread matching. */
+    rfcMessageId: text("rfc_message_id"),
+    /** Plus-address token used in Reply-To (e.g. s123). */
+    replyToToken: text("reply_to_token"),
     /** Opaque token for the recipient's one-click unsubscribe link. */
     unsubscribeToken: text("unsubscribe_token"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
@@ -62,6 +66,7 @@ export const emailSendsTable = pgTable(
         sql`${table.status} = 'scheduled' AND ${table.templateId} IS NOT NULL`,
       ),
     index("email_sends_resend_id_idx").on(table.resendId),
+    index("email_sends_rfc_message_id_idx").on(table.rfcMessageId),
     uniqueIndex("email_sends_unsubscribe_token_unique").on(table.unsubscribeToken),
   ],
 );

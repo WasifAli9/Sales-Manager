@@ -54,6 +54,8 @@ export interface SendEmailOptions {
   attachments?: EmailAttachment[];
   /** Override the default FROM address. Must be on a Resend-verified domain. */
   from?: string;
+  /** Reply-To address (used for inbound plus-address matching). */
+  replyTo?: string | string[];
   /** Standards-compliant message headers, e.g. List-Unsubscribe. */
   headers?: Record<string, string>;
 }
@@ -81,6 +83,7 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
       subject: opts.subject,
       html: opts.html,
       ...(opts.text ? { text: opts.text } : {}),
+      ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       ...(opts.headers ? { headers: opts.headers } : {}),
       ...(opts.attachments?.length
         ? {

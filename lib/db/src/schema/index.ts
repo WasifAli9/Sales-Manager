@@ -31,3 +31,7 @@ export * from "./emailCampaigns";
 export * from "./userProductEmailSettings";
 export * from "./emailBrandProfiles";
 export * from "./emailSavedSections";
+export * from "./leadIntelligence";
+export * from "./replyAgent";
+export * from "./opportunityAgent";
+export * from "./founderPlanner";

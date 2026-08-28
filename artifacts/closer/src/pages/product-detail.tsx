@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   ChevronRight, Globe, Kanban, BarChart3,
-  FileText, Mail, Sparkles, Loader2, Pencil, Save, ListChecks, ArrowDownUp, Palette, LayoutTemplate,
+  FileText, Mail, Sparkles, Loader2, Pencil, Save, ListChecks, ArrowDownUp, Palette, LayoutTemplate, Brain, Inbox,
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { useState } from "react"
@@ -27,6 +27,30 @@ const SECTIONS = [
     chevronHover: "group-hover:text-sky-400",
     title: "Website Intelligence",
     description: "ICP, value prop, pricing & competitor landscape",
+  },
+  {
+    key: "lead_intelligence",
+    getHref: (id: number) => `/products/${id}/lead-intelligence`,
+    Icon: Brain,
+    iconBg: "bg-violet-500/10",
+    iconColor: "text-violet-400",
+    hoverBorder: "hover:border-violet-500/30",
+    hoverBg: "hover:bg-violet-500/5",
+    chevronHover: "group-hover:text-violet-400",
+    title: "Lead Intelligence",
+    description: "AI research, ICP scores, tiers & campaign recommendations",
+  },
+  {
+    key: "ai_inbox",
+    getHref: (id: number) => `/products/${id}/ai-inbox`,
+    Icon: Inbox,
+    iconBg: "bg-teal-500/10",
+    iconColor: "text-teal-400",
+    hoverBorder: "hover:border-teal-500/30",
+    hoverBg: "hover:bg-teal-500/5",
+    chevronHover: "group-hover:text-teal-400",
+    title: "AI Inbox",
+    description: "Reply classification, drafts, follow-ups & approvals",
   },
   {
     key: "pipeline",

@@ -28,12 +28,15 @@ const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
 // ── types ──────────────────────────────────────────────────────────────────
 const STAGES = [
-  { id: "prospect",    label: "Prospect",      color: "bg-slate-500/20 text-slate-300 border-slate-500/30" },
-  { id: "qualified",   label: "Qualified",     color: "bg-blue-500/20 text-blue-300 border-blue-500/30" },
-  { id: "proposal",    label: "Proposal Sent", color: "bg-violet-500/20 text-violet-300 border-violet-500/30" },
-  { id: "negotiation", label: "Negotiation",   color: "bg-amber-500/20 text-amber-300 border-amber-500/30" },
-  { id: "closed_won",  label: "Closed Won",    color: "bg-green-500/20 text-green-300 border-green-500/30" },
-  { id: "closed_lost", label: "Closed Lost",   color: "bg-red-500/20 text-red-300 border-red-500/30" },
+  { id: "interested",  label: "Interested",  color: "bg-slate-500/20 text-slate-300 border-slate-500/30" },
+  { id: "discovery",   label: "Discovery",   color: "bg-sky-500/20 text-sky-300 border-sky-500/30" },
+  { id: "demo",        label: "Demo",        color: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30" },
+  { id: "qualified",   label: "Qualified",   color: "bg-blue-500/20 text-blue-300 border-blue-500/30" },
+  { id: "proposal",    label: "Proposal",    color: "bg-violet-500/20 text-violet-300 border-violet-500/30" },
+  { id: "decision",    label: "Decision",    color: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30" },
+  { id: "negotiation", label: "Negotiation", color: "bg-amber-500/20 text-amber-300 border-amber-500/30" },
+  { id: "won",         label: "Won",         color: "bg-green-500/20 text-green-300 border-green-500/30" },
+  { id: "lost",        label: "Lost",        color: "bg-red-500/20 text-red-300 border-red-500/30" },
 ] as const
 
 type StageId = (typeof STAGES)[number]["id"]
@@ -55,6 +58,8 @@ interface Deal {
   frequency?: string // monthly | annual
   stage: string
   probability: number
+  health?: string | null
+  arr?: string | null
   expectedCloseDate: string | null
   nextReviewDate: string | null
   notes: string | null
@@ -169,7 +174,7 @@ const emptyForm = () => ({
   value: "",
   currency: "USD",
   frequency: "monthly" as "monthly" | "annual",
-  stage: "prospect" as StageId,
+  stage: "interested" as StageId,
   probability: 50,
   expectedCloseDate: "",
   nextReviewDate: "",
@@ -521,9 +526,14 @@ function DealCard({ deal, productId }: { deal: Deal; productId: number }) {
             <div className="flex items-center gap-3 px-4 py-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold truncate">{deal.contactName}</p>
+                  <Link href={`/products/${productId}/opportunities/${deal.id}`} className="text-sm font-semibold truncate hover:underline">
+                    {deal.contactName}
+                  </Link>
                   {deal.companyName && (
                     <span className="text-xs text-muted-foreground truncate">· {deal.companyName}</span>
+                  )}
+                  {deal.health && deal.health !== "healthy" && (
+                    <Badge variant="outline" className="text-[10px] capitalize">{deal.health.replace("_", " ")}</Badge>
                   )}
                 </div>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
@@ -628,10 +638,10 @@ export default function PipelinePage() {
   const deals = dealsQuery.data ?? []
 
   // Summary numbers — all values annualised then converted to GBP
-  const activeDeals = deals.filter(d => d.stage !== "closed_lost")
+  const activeDeals = deals.filter(d => d.stage !== "lost")
   const totalPipelineGBP = activeDeals.reduce((s, d) => s + toGBP(annualValue(parseFloat(d.value) || 0, d.frequency), d.currency ?? "USD"), 0)
   const weightedPipelineGBP = activeDeals.reduce((s, d) => s + toGBP(annualValue(parseFloat(d.value) || 0, d.frequency) * d.probability / 100, d.currency ?? "USD"), 0)
-  const closedWonGBP = deals.filter(d => d.stage === "closed_won").reduce((s, d) => s + toGBP(annualValue(parseFloat(d.value) || 0, d.frequency), d.currency ?? "USD"), 0)
+  const closedWonGBP = deals.filter(d => d.stage === "won").reduce((s, d) => s + toGBP(annualValue(parseFloat(d.value) || 0, d.frequency), d.currency ?? "USD"), 0)
 
   // Group by stage for section display
   const displayed = stageFilter === "all" ? deals : deals.filter(d => d.stage === stageFilter)
@@ -673,6 +683,12 @@ export default function PipelinePage() {
               <p className="text-xs text-muted-foreground mt-0.5">{deals.length} deal{deals.length !== 1 ? "s" : ""}</p>
             </div>
             <div className="flex items-center gap-2">
+              <Link href={`/products/${productId}/my-actions`}>
+                <Button size="sm" variant="outline" className="h-9 rounded-xl gap-1.5">
+                  <Target className="w-4 h-4" />
+                  My Actions
+                </Button>
+              </Link>
               <Button onClick={() => setContactListOpen(true)} size="sm" variant="outline" className="h-9 rounded-xl gap-1.5">
                 <Users className="w-4 h-4" />
                 Contact list
