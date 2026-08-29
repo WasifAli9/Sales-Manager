@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags, Palette, LayoutTemplate } from "lucide-react"
+import { Mail, Pencil, Save, Loader2, ExternalLink, Sparkles, Plus, Trash2, ArrowUp, ArrowDown, Rocket, CalendarDays, Tags, Palette, LayoutTemplate, Send } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { useQuery } from "@tanstack/react-query"
@@ -21,6 +21,7 @@ import { useProductAssets, useUploadProductAsset } from "@/hooks/use-product-ass
 import { EmailSectionBuilder } from "@/components/email-builder/EmailSectionBuilder"
 import { createDefaultSection } from "@/components/email-builder/blocks/registry"
 import type { EmailSection } from "@/lib/email-sections"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
@@ -311,6 +312,7 @@ export function ProductSequenceWorkspace({
   initialSequenceId?: number
 }) {
   const { toast } = useToast()
+  const { user } = useAuth()
   const qc = useQueryClient()
   const [instruction, setInstruction] = useState("")
   const [savingInstruction, setSavingInstruction] = useState(false)
@@ -334,6 +336,9 @@ export function ProductSequenceWorkspace({
     return date.toISOString().slice(0, 16)
   })
   const [launching, setLaunching] = useState(false)
+  const [testStepIndex, setTestStepIndex] = useState<number | null>(null)
+  const [testEmailTo, setTestEmailTo] = useState("")
+  const [sendingTest, setSendingTest] = useState(false)
 
   const sequencesQuery = useQuery({
     queryKey: ["product-email-sequences", productId],
@@ -588,6 +593,56 @@ export function ProductSequenceWorkspace({
     }
   }
 
+  const openTestEmailDialog = (index: number) => {
+    setTestEmailTo(user?.email ?? "")
+    setTestStepIndex(index)
+  }
+
+  const sendTestEmail = async () => {
+    if (testStepIndex === null) return
+    const step = draft.steps[testStepIndex]
+    if (!step.subject.trim() || !stepHasContent(step)) {
+      toast({ title: "Add subject and content first", variant: "destructive" })
+      return
+    }
+    const to = testEmailTo.trim()
+    if (!to) {
+      toast({ title: "Enter an email address", variant: "destructive" })
+      return
+    }
+    setSendingTest(true)
+    try {
+      const res = await fetch(`${BASE}/api/products/${productId}/email-sequences/send-test`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          subject: step.subject,
+          body: step.editorMode === "classic" ? step.body : undefined,
+          sectionsJson: step.editorMode === "visual" ? step.sectionsJson : null,
+          designTemplateId: step.designTemplateId,
+          sequenceDesignTemplateId: draft.designTemplateId,
+          logoAssetId: draft.logoAssetId,
+          subjectVariantB: step.abTestEnabled ? step.subjectVariantB.trim() || null : null,
+          bodyVariantB: step.abTestEnabled && step.editorMode === "classic" ? step.bodyVariantB.trim() || null : null,
+        }),
+      })
+      const result = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(result.error || "Could not send test email")
+      toast({ title: "Test email sent", description: `Sent to ${to}` })
+      setTestStepIndex(null)
+    } catch (error) {
+      toast({
+        title: "Could not send test email",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setSendingTest(false)
+    }
+  }
+
   const loadSequence = async (id: string) => {
     setSelectedSequenceId(id)
     if (!id) return
@@ -811,7 +866,20 @@ export function ProductSequenceWorkspace({
                   </Button>
                 </div>
               </div>
-              <Input value={step.subject} onChange={event => updateDraftStep(index, { subject: event.target.value })} placeholder="Email subject (variant A)" className="bg-background" />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input value={step.subject} onChange={event => updateDraftStep(index, { subject: event.target.value })} placeholder="Email subject (variant A)" className="bg-background sm:flex-1" />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  disabled={!step.subject.trim() || !stepHasContent(step)}
+                  onClick={() => openTestEmailDialog(index)}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Send Test Email
+                </Button>
+              </div>
               <div className="rounded-xl border border-border/50 bg-muted/10 p-3 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">A/B subject test</p>
@@ -1038,6 +1106,41 @@ export function ProductSequenceWorkspace({
         </div>
         {campaignAudience === "list" && !contactListsQuery.data?.length && <p className="text-xs text-muted-foreground">Create a list from the Leads page first, or switch to a tag audience.</p>}
       </div>
+
+      <Dialog open={testStepIndex !== null} onOpenChange={open => { if (!open) setTestStepIndex(null) }}>
+        <DialogContent className="bg-card border-border/30 max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Send test email</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {testStepIndex !== null
+              ? `Email ${testStepIndex + 1} will be sent with sample merge data (Alex Sample, Acme Corp).`
+              : ""}
+          </p>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Email address</label>
+            <Input
+              type="email"
+              value={testEmailTo}
+              onChange={event => setTestEmailTo(event.target.value)}
+              placeholder="you@company.com"
+              autoFocus
+              onKeyDown={event => {
+                if (event.key === "Enter" && !sendingTest) void sendTestEmail()
+              }}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setTestStepIndex(null)} disabled={sendingTest}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void sendTestEmail()} disabled={sendingTest || !testEmailTo.trim()} className="gap-1.5">
+              {sendingTest ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

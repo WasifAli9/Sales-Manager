@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, uniqueIndex, index, varchar } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { leadsTable } from "./leads";
 import { emailTemplatesTable } from "./emailTemplates";
@@ -27,6 +27,8 @@ export const emailSendsTable = pgTable(
     rfcMessageId: text("rfc_message_id"),
     /** Plus-address token used in Reply-To (e.g. s123). */
     replyToToken: text("reply_to_token"),
+    /** User who scheduled this send (for daily quota). */
+    scheduledByUserId: varchar("scheduled_by_user_id"),
     /** Opaque token for the recipient's one-click unsubscribe link. */
     unsubscribeToken: text("unsubscribe_token"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),

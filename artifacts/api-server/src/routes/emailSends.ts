@@ -19,6 +19,13 @@ import { appendUnsubscribeFooter, createUnsubscribeToken, unsubscribeHeaders } f
 import { resolveSenderEmailConfig, type SenderEmailConfig } from "../lib/resolveSenderEmailConfig";
 import { appendSignatureHtml } from "../lib/emailSignatureHtml";
 import { inboundReplyToAddress } from "../lib/reply-agent/helpers";
+import {
+  canSendOneMore,
+  findNextAvailableSendSlot,
+  getOrgEmailSendSettings,
+  resolveQuotaUserId,
+  spreadSendTime,
+} from "../lib/emailDailyQuota";
 
 type ProductConfig = SenderEmailConfig;
 
@@ -181,6 +188,18 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     }
 
     try {
+      const quotaUserId = resolveQuotaUserId(req.user!.id, lead.assignedToUserId);
+      let sendAt = validation.date;
+      if (quotaUserId) {
+        const settings = await getOrgEmailSendSettings();
+        if (settings.enabled) {
+          const ok = await canSendOneMore(quotaUserId, sendAt.toISOString().slice(0, 10));
+          if (!ok) {
+            sendAt = await findNextAvailableSendSlot(quotaUserId, sendAt);
+          }
+        }
+      }
+
       const [send] = await db
         .insert(emailSendsTable)
         .values({
@@ -192,7 +211,8 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
           body: bodyWithControls,
           unsubscribeToken: token,
           status: "scheduled",
-          scheduledFor: validation.date,
+          scheduledFor: sendAt,
+          scheduledByUserId: req.user!.id,
         })
         .returning();
 
@@ -208,6 +228,35 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
   }
 
   // Send immediately
+  const quotaUserId = resolveQuotaUserId(req.user!.id, lead.assignedToUserId);
+  if (quotaUserId) {
+    const ok = await canSendOneMore(quotaUserId);
+    if (!ok) {
+      const slot = await findNextAvailableSendSlot(quotaUserId, new Date());
+      const [send] = await db
+        .insert(emailSendsTable)
+        .values({
+          leadId,
+          templateId: templateId ?? null,
+          toAddress: lead.email,
+          fromAddress: productConfig.from ?? null,
+          subject: resolvedSubject,
+          body: bodyWithControls,
+          unsubscribeToken: token,
+          status: "scheduled",
+          scheduledFor: slot,
+          scheduledByUserId: req.user!.id,
+        })
+        .returning();
+      res.status(202).json({
+        ...send,
+        deferred: true,
+        message: "Daily send limit reached — email queued for the next available slot.",
+      });
+      return;
+    }
+  }
+
   const [send] = await db
     .insert(emailSendsTable)
     .values({
@@ -219,6 +268,7 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
       body: bodyWithControls,
       unsubscribeToken: token,
       status: "pending",
+      scheduledByUserId: req.user!.id,
     })
     .returning();
 
@@ -428,6 +478,8 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
   const MAX_GAP_MS = 90_000;
   let offsetMs = 0;
   const batchId = randomUUID();
+  const orgLimits = await getOrgEmailSendSettings();
+  let spreadIndex = 0;
 
   for (const lead of leads) {
     if (!lead.email) { skipped++; continue; }
@@ -446,7 +498,10 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
     const productConfig = await resolveProductConfig(lead.id, req.user?.id);
     const token = createUnsubscribeToken();
     const interpolatedBody = interpolate(body, vars);
-    const sendAt = new Date(scheduledDate.getTime() + offsetMs);
+    const gapMs = MIN_GAP_MS + Math.floor(Math.random() * (MAX_GAP_MS - MIN_GAP_MS));
+    const sendAt = orgLimits.enabled
+      ? spreadSendTime(scheduledDate, spreadIndex++, orgLimits.dailyMax, gapMs)
+      : new Date(scheduledDate.getTime() + offsetMs);
 
     try {
       await db.insert(emailSendsTable).values({
@@ -460,9 +515,12 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
         unsubscribeToken: token,
         status: "scheduled",
         scheduledFor: sendAt,
+        scheduledByUserId: req.user!.id,
       });
       scheduled++;
-      offsetMs += MIN_GAP_MS + Math.floor(Math.random() * (MAX_GAP_MS - MIN_GAP_MS));
+      if (!orgLimits.enabled) {
+        offsetMs += gapMs;
+      }
     } catch (err: unknown) {
       if (isDuplicateScheduledError(err)) {
         duplicates++;
@@ -473,7 +531,15 @@ router.post("/leads/bulk-schedule-email", async (req: Request, res: Response) =>
     }
   }
 
-  res.json({ scheduled, skipped, duplicates, unsubscribed, batchId });
+  res.json({
+    scheduled,
+    skipped,
+    duplicates,
+    unsubscribed,
+    batchId,
+    spreadAcrossDays: orgLimits.enabled,
+    dailyMaxPerMember: orgLimits.enabled ? orgLimits.dailyMax : null,
+  });
 });
 
 function ratePct(numerator: number, denominator: number): number {
@@ -845,6 +911,27 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
       skipped++;
       continue;
     }
+
+    const [leadRow] = await db
+      .select({ assignedToUserId: leadsTable.assignedToUserId })
+      .from(leadsTable)
+      .where(eq(leadsTable.id, send.leadId))
+      .limit(1);
+    const quotaUserId = resolveQuotaUserId(send.scheduledByUserId, leadRow?.assignedToUserId);
+    if (quotaUserId) {
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const ok = await canSendOneMore(quotaUserId, todayKey);
+      if (!ok) {
+        const nextSlot = await findNextAvailableSendSlot(quotaUserId, new Date());
+        await db
+          .update(emailSendsTable)
+          .set({ scheduledFor: nextSlot })
+          .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "scheduled")));
+        skipped++;
+        continue;
+      }
+    }
+
     const [claimed] = await db
       .update(emailSendsTable)
       .set({ status: "pending" })

@@ -20,10 +20,12 @@ import { canAccessProduct } from "../lib/productAccess";
 import { resolveTagAudienceLeadIds } from "../lib/tagAudience";
 import { appendUnsubscribeFooter, createUnsubscribeToken } from "../lib/unsubscribe";
 import { resolveSenderEmailConfig } from "../lib/resolveSenderEmailConfig";
-import { loadSequenceDesignContext, renderSequenceStepBody, loadBrandForProduct } from "../lib/emailDesignContext";
+import { loadSequenceDesignContext, renderSequenceStepBody, loadBrandForProduct, resolveStepShell } from "../lib/emailDesignContext";
+import { sendEmail } from "../lib/email";
 import { coerceSections, renderSectionsBodyFragment } from "../lib/emailSectionRender";
 import { appendSignatureHtml, signatureContentHtml } from "../lib/emailSignatureHtml";
 import { appPublicUrl } from "../lib/appUrl";
+import { getOrgEmailSendSettings, spreadSendTime } from "../lib/emailDailyQuota";
 
 const router: IRouter = Router();
 
@@ -79,6 +81,35 @@ const generatedSequenceSchema = z.object({
     body: z.string().trim().min(1).max(25000),
   })).min(1).max(365),
 });
+
+const sendTestEmailSchema = z.object({
+  to: z.string().trim().email().max(320),
+  subject: z.string().trim().min(1).max(300),
+  body: z.string().trim().max(25000).optional(),
+  sectionsJson: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
+  designTemplateId: z.number().int().positive().nullable().optional(),
+  sequenceDesignTemplateId: z.number().int().positive().nullable().optional(),
+  logoAssetId: z.number().int().positive().nullable().optional(),
+  subjectVariantB: z.string().trim().max(300).optional().nullable(),
+  bodyVariantB: z.string().trim().max(25000).optional().nullable(),
+  variant: z.enum(["A", "B"]).optional(),
+}).superRefine((step, ctx) => {
+  const hasSections = Array.isArray(step.sectionsJson) && step.sectionsJson.length > 0;
+  const hasBody = typeof step.body === "string" && step.body.trim().length > 0;
+  if (!hasSections && !hasBody) {
+    ctx.addIssue({ code: "custom", message: "Email needs body content or sections" });
+  }
+});
+
+const TEST_MERGE_LEAD = {
+  firstName: "Alex",
+  lastName: "Sample",
+  company: "Acme Corp",
+  title: "Head of Operations",
+  email: "alex.sample@example.com",
+};
+
+const TEST_EMAIL_BANNER = `<div style="background:#fef3c7;padding:10px 14px;font-size:13px;color:#92400e;margin-bottom:16px;border-radius:6px;text-align:center;"><strong>Test email</strong> — merge fields use sample data (Alex Sample, Acme Corp).</div>`;
 
 function requireAuth(req: Request, res: Response): boolean {
   if (!req.isAuthenticated()) {
@@ -262,11 +293,23 @@ async function prepareSequenceSchedule(
   const origin = appPublicUrl();
 
   const values = [];
+  const orgLimits = await getOrgEmailSendSettings();
+  let leadSpreadIndex = 0;
+  const MIN_GAP_MS = 45_000;
+  const MAX_GAP_MS = 90_000;
+
   for (const lead of eligibleLeads) {
     const product = (sequence.productId ? productMap.get(sequence.productId) : undefined)
       ?? (lead.productId ? productMap.get(lead.productId) : undefined)
       ?? null;
     const senderConfig = await getSenderConfig(sequence.productId ?? lead.productId ?? null);
+
+    let leadStart = startDate;
+    if (orgLimits.enabled) {
+      const gapMs = MIN_GAP_MS + Math.floor(Math.random() * (MAX_GAP_MS - MIN_GAP_MS));
+      leadStart = spreadSendTime(startDate, leadSpreadIndex++, orgLimits.dailyMax, gapMs);
+    }
+
     for (const step of steps) {
       const token = createUnsubscribeToken();
       const abVariant = pickAbVariant(step);
@@ -308,10 +351,11 @@ async function prepareSequenceSchedule(
         ),
         unsubscribeToken: token,
         status: "scheduled" as const,
-        scheduledFor: new Date(startDate.getTime() + step.delayDays * 86_400_000),
+        scheduledFor: new Date(leadStart.getTime() + step.delayDays * 86_400_000),
         sequenceId,
         sequenceStepId: step.id,
         abVariant,
+        scheduledByUserId: senderUserId ?? null,
       });
     }
   }
@@ -864,6 +908,94 @@ router.post("/email-sequences/:id/launch", async (req: Request, res: Response): 
     req.log.error({ error, sequenceId, contactListId }, "Campaign launch failed");
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not launch campaign" });
   }
+});
+
+router.post("/products/:productId/email-sequences/send-test", async (req: Request, res: Response): Promise<void> => {
+  if (!requireAuth(req, res)) return;
+  const productId = parseId(req.params.productId);
+  if (!productId) {
+    res.status(400).json({ error: "Invalid product id" });
+    return;
+  }
+  if (!await canAccessProduct(req, productId)) {
+    res.status(403).json({ error: "You do not have access to this product" });
+    return;
+  }
+
+  const parsed = sendTestEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid request" });
+    return;
+  }
+  const payload = parsed.data;
+
+  const [product] = await db.select().from(productsTable).where(eq(productsTable.id, productId)).limit(1);
+  if (!product) {
+    res.status(404).json({ error: "Product not found" });
+    return;
+  }
+
+  const variant = payload.variant === "B" && payload.subjectVariantB?.trim() ? "B" : "A";
+  const variantContent = stepVariantContent(
+    {
+      subject: payload.subject,
+      body: payload.body ?? "",
+      sectionsJson: payload.sectionsJson,
+      subjectVariantB: payload.subjectVariantB,
+      bodyVariantB: payload.bodyVariantB,
+    },
+    variant,
+  );
+
+  const designCtx = await loadSequenceDesignContext({
+    productId,
+    brandName: product.name,
+    sequenceLogoAssetId: payload.logoAssetId ?? null,
+    sequenceDesignTemplateId: payload.sequenceDesignTemplateId ?? null,
+    steps: [{ id: 0, designTemplateId: payload.designTemplateId ?? null }],
+  });
+
+  const sectionBrand = await loadBrandForProduct(productId);
+  const origin = appPublicUrl();
+  const stepSections = variantContent.sections;
+  const rawContent = stepSections?.length
+    ? renderSectionsBodyFragment(stepSections, sectionBrand, origin)
+    : variantContent.body;
+  const contentBody = interpolate(rawContent, { ...TEST_MERGE_LEAD, email: payload.to });
+
+  const senderConfig = await resolveSenderEmailConfig(productId, req.user!.id);
+  const signature = senderConfig.signature ?? product.emailSignature;
+  const stepShell = resolveStepShell(designCtx, payload.designTemplateId);
+  const designedBody = renderSequenceStepBody({
+    ctx: designCtx,
+    stepDesignTemplateId: payload.designTemplateId,
+    bodyHtml: `${TEST_EMAIL_BANNER}${contentBody}`,
+    signatureHtml: signatureContentHtml(signature),
+  });
+  const html = stepShell?.includes("{{signature}}")
+    ? designedBody
+    : withSignature(designedBody, signature);
+
+  const subject = interpolate(variantContent.subject, { ...TEST_MERGE_LEAD, email: payload.to });
+  const from = senderConfig.from ?? fromAddress(product);
+  if (!from) {
+    res.status(400).json({ error: "Configure a from email for this product before sending test emails" });
+    return;
+  }
+
+  const result = await sendEmail({
+    to: payload.to,
+    from,
+    subject: `[TEST] ${subject}`,
+    html,
+  });
+
+  if (!result.ok) {
+    res.status(502).json({ error: result.error });
+    return;
+  }
+
+  res.json({ ok: true, id: result.id });
 });
 
 export default router;

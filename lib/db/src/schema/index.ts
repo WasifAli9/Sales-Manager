@@ -35,3 +35,4 @@ export * from "./leadIntelligence";
 export * from "./replyAgent";
 export * from "./opportunityAgent";
 export * from "./founderPlanner";
+export * from "./orgEmailSendSettings";

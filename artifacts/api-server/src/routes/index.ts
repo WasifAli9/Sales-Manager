@@ -41,6 +41,7 @@ import leadIntelligenceRouter from "./leadIntelligence";
 import replyAgentRouter from "./replyAgent";
 import opportunityAgentRouter from "./opportunityAgent";
 import founderPlannerRouter from "./founderPlanner";
+import emailSendLimitsRouter from "./emailSendLimits";
 
 const router: IRouter = Router();
 
@@ -86,5 +87,6 @@ router.use(leadIntelligenceRouter);
 router.use(replyAgentRouter);
 router.use(opportunityAgentRouter);
 router.use(founderPlannerRouter);
+router.use(emailSendLimitsRouter);
 
 export default router;

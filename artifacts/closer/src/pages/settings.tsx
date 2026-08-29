@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { useAuth, useAuthActions } from "@/hooks/use-auth"
 import { useQueryClient, useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
@@ -419,6 +419,9 @@ export default function SettingsPage() {
         </Card>
       </Section>
 
+      {/* ── Outbound email limits ─────────────────────────────────────────── */}
+      <EmailSendLimitsSection />
+
       {/* ── Team ─────────────────────────────────────────────────────────── */}
       <TeamSection />
 
@@ -451,6 +454,179 @@ interface TeamMemberExt extends TeamMember {
   pendingInvite?: PendingInvite | null
 }
 interface ProductAssignmentRow { productId: number; permissions: string[] | null }
+
+type EmailLimitSettings = {
+  enabled: boolean
+  dailyMax: number
+  dailyMin: number | null
+}
+
+// ── Email send limits (org-wide, per team member) ─────────────────────────────
+function EmailSendLimitsSection() {
+  const { user } = useAuth()
+  const isOwner = user?.role === "owner"
+  const qc = useQueryClient()
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [form, setForm] = useState<EmailLimitSettings>({ enabled: false, dailyMax: 100, dailyMin: null })
+  const [randomize, setRandomize] = useState(false)
+
+  const limitsQuery = useQuery({
+    queryKey: ["email-send-limits"],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/api/settings/email-send-limits`, { credentials: "include" })
+      if (!res.ok) throw new Error("Failed to load email limits")
+      return res.json() as Promise<{
+        settings: EmailLimitSettings
+        myQuota: { enabled: boolean; allowed: number | null; sent: number; remaining: number | null }
+      }>
+    },
+  })
+
+  useEffect(() => {
+    if (limitsQuery.data?.settings) {
+      const s = limitsQuery.data.settings
+      setForm(s)
+      setRandomize(s.dailyMin != null && s.dailyMin < s.dailyMax)
+    }
+  }, [limitsQuery.data])
+
+  const handleSave = async () => {
+    if (!isOwner) return
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const payload: EmailLimitSettings = {
+        enabled: form.enabled,
+        dailyMax: form.dailyMax,
+        dailyMin: randomize && form.dailyMin != null && form.dailyMin < form.dailyMax ? form.dailyMin : null,
+      }
+      const res = await fetch(`${BASE}/api/settings/email-send-limits`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json() as { error?: string }
+      if (!res.ok) throw new Error(data.error ?? "Save failed")
+      await qc.invalidateQueries({ queryKey: ["email-send-limits"] })
+      setSuccess("Email limits saved.")
+      setTimeout(() => setSuccess(null), 4000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const myQuota = limitsQuery.data?.myQuota
+
+  return (
+    <Section icon={Send} title="Outbound email limits">
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Cap how many emails each team member can send per day. Large contact selections are spread across days automatically
+            (e.g. 8,000 contacts at 100/day ≈ 80 days per member).
+          </p>
+
+          {limitsQuery.isLoading ? (
+            <div className="h-16 bg-muted rounded-xl animate-pulse" />
+          ) : (
+            <>
+              {myQuota?.enabled && (
+                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs">
+                  <span className="font-medium">Your quota today:</span>{" "}
+                  {myQuota.sent} / {myQuota.allowed} sent
+                  {myQuota.remaining != null && myQuota.remaining > 0 && (
+                    <span className="text-muted-foreground"> · {myQuota.remaining} remaining</span>
+                  )}
+                </div>
+              )}
+
+              {isOwner ? (
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.enabled}
+                      onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
+                      className="rounded border-border"
+                    />
+                    Enable daily send limits for all team members
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Max emails per member / day</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={form.dailyMax}
+                        onChange={(e) => setForm((f) => ({ ...f, dailyMax: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                        className="h-9 rounded-lg"
+                        disabled={!form.enabled}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Min (optional)
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={form.dailyMax}
+                        value={randomize ? (form.dailyMin ?? "") : ""}
+                        placeholder={randomize ? "e.g. 80" : "—"}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10)
+                          setForm((f) => ({ ...f, dailyMin: Number.isFinite(v) ? v : null }))
+                        }}
+                        className="h-9 rounded-lg"
+                        disabled={!form.enabled || !randomize}
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={randomize}
+                      onChange={(e) => {
+                        setRandomize(e.target.checked)
+                        if (e.target.checked && !form.dailyMin) {
+                          setForm((f) => ({ ...f, dailyMin: Math.max(1, Math.floor(f.dailyMax * 0.85)) }))
+                        }
+                      }}
+                      disabled={!form.enabled}
+                      className="rounded border-border"
+                    />
+                    Randomise each member&apos;s daily cap between min and max (varies per day, stable within the day)
+                  </label>
+
+                  <Feedback error={error} success={success} />
+                  <Button onClick={handleSave} disabled={saving} className="w-full h-10 rounded-xl gap-2">
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save email limits
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {form.enabled
+                    ? `Limit active: up to ${form.dailyMax} emails per team member per day.`
+                    : "Daily send limits are not enabled. Ask the account owner to configure them."}
+                </p>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </Section>
+  )
+}
 
 // ── TeamSection ───────────────────────────────────────────────────────────────
 function TeamSection() {
