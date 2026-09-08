@@ -14,6 +14,7 @@ import {
   applyProductResult,
   applyProductFailure,
   getNextMonthKey,
+  monthEndDate,
   sanitizeSocialCaption,
 } from "./socialScheduleHelpers.ts";
 
@@ -172,6 +173,23 @@ describe("getNextMonthKey", () => {
   it("returns a string matching /^\\d{4}-\\d{2}$/", () => {
     const key = getNextMonthKey(new Date("2026-08-16"));
     assert.match(key, /^\d{4}-\d{2}$/);
+  });
+});
+
+describe("monthEndDate", () => {
+  it("returns the real last day for 30-day months", () => {
+    assert.equal(monthEndDate("2026-09"), "2026-09-30");
+    assert.equal(monthEndDate("2026-04"), "2026-04-30");
+  });
+
+  it("returns 31 for 31-day months", () => {
+    assert.equal(monthEndDate("2026-08"), "2026-08-31");
+    assert.equal(monthEndDate("2026-01"), "2026-01-31");
+  });
+
+  it("handles February in leap and non-leap years", () => {
+    assert.equal(monthEndDate("2024-02"), "2024-02-29");
+    assert.equal(monthEndDate("2026-02"), "2026-02-28");
   });
 });
 

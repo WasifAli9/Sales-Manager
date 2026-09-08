@@ -72,6 +72,21 @@ export function getNextMonthKey(now: Date = new Date()): string {
   return `${nextM.getFullYear()}-${String(nextM.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/**
+ * Last calendar day of a "YYYY-MM" month as "YYYY-MM-DD".
+ * Avoids invalid dates like 2026-09-31 that Postgres date columns reject.
+ */
+export function monthEndDate(monthKey: string): string {
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error(`Invalid monthKey: ${monthKey}`);
+  }
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${monthKey}-${String(lastDay).padStart(2, "0")}`;
+}
+
 // ── Caption cleanup ───────────────────────────────────────────────────────────
 
 /**

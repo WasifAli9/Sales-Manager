@@ -21,6 +21,7 @@ import {
   applyProductResult,
   applyProductFailure,
   getNextMonthKey,
+  monthEndDate,
   sanitizeSocialCaption,
 } from "../lib/socialScheduleHelpers";
 
@@ -644,7 +645,7 @@ router.get("/products/:productId/social/posts", async (req, res) => {
           platform ? eq(socialPostsTable.platform, platform) : undefined,
           status   ? eq(socialPostsTable.status,   status)   : undefined,
           month    ? gte(socialPostsTable.scheduledDate, `${month}-01`) : undefined,
-          month    ? lte(socialPostsTable.scheduledDate, `${month}-31`) : undefined,
+          month    ? lte(socialPostsTable.scheduledDate, monthEndDate(month)) : undefined,
         ),
       )
       .orderBy(socialPostsTable.scheduledDate, socialPostsTable.platform);
@@ -847,7 +848,7 @@ function makeRealDeps() {
           and(
             eq(socialPostsTable.productId, productId),
             gte(socialPostsTable.scheduledDate, `${monthKey}-01`),
-            lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
+            lte(socialPostsTable.scheduledDate, monthEndDate(monthKey)),
           ),
         )
         .limit(1),
@@ -857,7 +858,7 @@ function makeRealDeps() {
         and(
           eq(socialPostsTable.productId, productId),
           gte(socialPostsTable.scheduledDate, `${monthKey}-01`),
-          lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
+          lte(socialPostsTable.scheduledDate, monthEndDate(monthKey)),
         ),
       );
     },
@@ -878,7 +879,7 @@ function makeRealDeps() {
           and(
             eq(socialPostsTable.productId, productId),
             gte(socialPostsTable.scheduledDate, `${monthKey}-01`),
-            lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
+            lte(socialPostsTable.scheduledDate, monthEndDate(monthKey)),
           ),
         ),
 
@@ -1311,7 +1312,7 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
       and(
         eq(socialPostsTable.productId, productId),
         gte(socialPostsTable.scheduledDate, `${monthKey}-01`),
-        lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
+        lte(socialPostsTable.scheduledDate, monthEndDate(monthKey)),
       ),
     );
 
@@ -1362,7 +1363,7 @@ router.post("/products/:productId/social/generate-schedule", async (req, res) =>
         and(
           eq(socialPostsTable.productId, productId),
           gte(socialPostsTable.scheduledDate, startDate),
-          lte(socialPostsTable.scheduledDate, `${monthKey}-31`),
+          lte(socialPostsTable.scheduledDate, monthEndDate(monthKey)),
         ),
       )
       .orderBy(socialPostsTable.scheduledDate, socialPostsTable.platform);
@@ -1452,7 +1453,7 @@ router.delete("/products/:productId/social/posts", async (req, res) => {
         and(
           eq(socialPostsTable.productId, productId),
           gte(socialPostsTable.scheduledDate, `${month}-01`),
-          lte(socialPostsTable.scheduledDate, `${month}-31`),
+          lte(socialPostsTable.scheduledDate, monthEndDate(month)),
         ),
       );
     res.json({ ok: true });
