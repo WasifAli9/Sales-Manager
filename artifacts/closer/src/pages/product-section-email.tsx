@@ -317,7 +317,7 @@ export function ProductSequenceWorkspace({
   const [instruction, setInstruction] = useState("")
   const [savingInstruction, setSavingInstruction] = useState(false)
   const [emailCount, setEmailCount] = useState(3)
-  const [gaps, setGaps] = useState<number[]>([3, 4])
+  const [gaps, setGaps] = useState<number[]>([7, 7])
   const [draft, setDraft] = useState<SequenceDraft>(emptyDraft())
   const [generating, setGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
@@ -403,7 +403,7 @@ export function ProductSequenceWorkspace({
   }, [draft.logoAssetId, brandQuery.data, assetsQuery.data])
 
   useEffect(() => {
-    setGaps(previous => Array.from({ length: Math.max(0, emailCount - 1) }, (_, index) => previous[index] ?? 3))
+    setGaps(previous => Array.from({ length: Math.max(0, emailCount - 1) }, (_, index) => previous[index] ?? 7))
   }, [emailCount])
   useEffect(() => {
     if (instructionQuery.data) setInstruction(instructionQuery.data.instruction)
@@ -465,7 +465,7 @@ export function ProductSequenceWorkspace({
     const waits = draft.steps.slice(1).map((step, stepIndex) => step.delayDays - draft.steps[stepIndex].delayDays)
     let day = 0
     setDraft({ ...draft, steps: steps.map((step, stepIndex) => {
-      if (stepIndex > 0) day += waits[stepIndex - 1] ?? 3
+      if (stepIndex > 0) day += waits[stepIndex - 1] ?? 7
       return { ...step, delayDays: day }
     }) })
   }
@@ -1043,7 +1043,7 @@ export function ProductSequenceWorkspace({
             </div>
           ))}
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setDraft({ ...draft, steps: [...draft.steps, blankStep((draft.steps.at(-1)?.delayDays ?? 0) + 3)] })} className="gap-1.5">
+            <Button variant="outline" onClick={() => setDraft({ ...draft, steps: [...draft.steps, blankStep((draft.steps.at(-1)?.delayDays ?? 0) + 7)] })} className="gap-1.5">
               <Plus className="w-4 h-4" /> Add email
             </Button>
             <Button onClick={saveSequence} disabled={saving} className="gap-1.5">
