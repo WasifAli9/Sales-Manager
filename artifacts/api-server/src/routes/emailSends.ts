@@ -18,7 +18,7 @@ import { canAccessProduct } from "../lib/productAccess";
 import { appendUnsubscribeFooter, createUnsubscribeToken, unsubscribeHeaders } from "../lib/unsubscribe";
 import { resolveSenderEmailConfig, type SenderEmailConfig } from "../lib/resolveSenderEmailConfig";
 import { appendSignatureHtml } from "../lib/emailSignatureHtml";
-import { inboundReplyToAddress } from "../lib/reply-agent/helpers";
+import { normalizeEmail } from "../lib/reply-agent/helpers";
 import {
   canSendOneMore,
   findNextAvailableSendSlot,
@@ -291,16 +291,16 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     return;
   }
 
-  const replyTo = inboundReplyToAddress(send.id);
-  const replyToToken = replyTo ? `s${send.id}` : null;
+  const fromAddress = productConfig.from;
+  const replyTo = normalizeEmail(fromAddress) ?? undefined;
   const rfcMessageId = `<sm-send-${send.id}@salesmanager.local>`;
   const result = await sendEmail({
     to: lead.email,
     subject: resolvedSubject,
     html: wrapHtml(bodyWithControls),
     attachments,
-      from: productConfig.from,
-    replyTo: replyTo ?? undefined,
+      from: fromAddress,
+    replyTo,
     headers: {
       ...unsubscribeHeaders(token),
       "Message-ID": rfcMessageId,
@@ -313,7 +313,7 @@ router.post("/leads/:id/send-email", async (req: Request, res: Response) => {
     .set({
       status: resendId ? "sent" : "failed",
       resendId: resendId ?? null,
-      replyToToken,
+      replyToToken: null,
       rfcMessageId,
       sentAt: resendId ? new Date() : null,
       errorMessage: resendId ? null : (result.ok ? "Resend returned no ID" : result.error),
@@ -971,15 +971,15 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
         .set({ unsubscribeToken: token, body })
       .where(and(eq(emailSendsTable.id, send.id), eq(emailSendsTable.status, "pending")));
     }
-    const replyTo = inboundReplyToAddress(send.id);
-    const replyToToken = replyTo ? `s${send.id}` : null;
+    const fromAddress = send.fromAddress ?? salesFromEmail();
+    const replyTo = normalizeEmail(fromAddress) ?? undefined;
     const rfcMessageId = `<sm-send-${send.id}@salesmanager.local>`;
     const result = await sendEmail({
       to: send.toAddress,
       subject: send.subject,
       html: wrapHtml(body),
-      from: send.fromAddress ?? salesFromEmail(),
-      replyTo: replyTo ?? undefined,
+      from: fromAddress,
+      replyTo,
       headers: {
         ...unsubscribeHeaders(token),
         "Message-ID": rfcMessageId,
@@ -993,7 +993,7 @@ export async function sendScheduledEmails(): Promise<{ sent: number; failed: num
         .set({
           status: "sent",
           resendId,
-          replyToToken,
+          replyToToken: null,
           rfcMessageId,
           sentAt: new Date(),
         })
