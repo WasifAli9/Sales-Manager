@@ -51,6 +51,7 @@ interface Lead {
   lastActionAt: string | null
   notes: string | null
   assignedToUserId: string | null
+  assignedToName: string | null
   productId?: number | null
   createdAt: string
   tags: LeadTag[]
@@ -1918,6 +1919,12 @@ function LeadCard({
         <p className="text-xs text-muted-foreground truncate">
           {[lead.title, lead.company].filter(Boolean).join(" · ")}
         </p>
+        {lead.assignedToName && (
+          <p className="text-[10px] text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+            <Users className="w-3 h-3 shrink-0 opacity-70" />
+            Assigned to {lead.assignedToName}
+          </p>
+        )}
         {lead.tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {lead.tags.slice(0, 3).map(tag => <span key={tag.id} className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium text-primary">{tag.name}</span>)}

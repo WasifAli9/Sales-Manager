@@ -80,7 +80,18 @@ jobs:
             cd "${DEPLOY_PATH}"
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
             export IMAGE
-            docker compose pull
+            # Retry pull — GHCR transfers occasionally reset mid-layer download.
+            attempt=1
+            max_attempts=5
+            until docker compose pull; do
+              if [ "${attempt}" -ge "${max_attempts}" ]; then
+                echo "docker compose pull failed after ${max_attempts} attempts"
+                exit 1
+              fi
+              echo "Pull attempt ${attempt} failed; retrying in 15s…"
+              attempt=$((attempt + 1))
+              sleep 15
+            done
             docker compose up -d --remove-orphans
             docker image prune -f
             docker compose ps

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
-import { leadsTable, productsTable, emailSendsTable, leadTagsTable, leadTagAssignmentsTable } from "@workspace/db/schema";
+import { leadsTable, productsTable, emailSendsTable, leadTagsTable, leadTagAssignmentsTable, teamMembersTable, usersTable } from "@workspace/db/schema";
 import { eq, and, inArray, sql, notInArray, asc } from "drizzle-orm";
 import { requireOwner } from "../middlewares/requireOwner";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -98,6 +98,71 @@ async function attachTags<T extends { id: number }>(leads: T[]): Promise<Array<T
   return leads.map((lead) => ({ ...lead, tags: tagsByLead.get(lead.id) ?? [] }));
 }
 
+function displayNameFromUser(user: {
+  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+}): string {
+  const full = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  if (full) return full;
+  if (user.name?.trim()) return user.name.trim();
+  return user.email;
+}
+
+/** Resolve assignee display names (prefer team member name, fall back to user profile). */
+async function attachAssigneeNames<T extends { assignedToUserId: string | null }>(
+  leads: T[],
+): Promise<Array<T & { assignedToName: string | null }>> {
+  if (!leads.length) return [];
+  const userIds = [...new Set(
+    leads.map((lead) => lead.assignedToUserId).filter((id): id is string => Boolean(id)),
+  )];
+  if (!userIds.length) {
+    return leads.map((lead) => ({ ...lead, assignedToName: null }));
+  }
+
+  const [teamRows, userRows] = await Promise.all([
+    db
+      .select({ userId: teamMembersTable.userId, name: teamMembersTable.name })
+      .from(teamMembersTable)
+      .where(inArray(teamMembersTable.userId, userIds)),
+    db
+      .select({
+        id: usersTable.id,
+        name: usersTable.name,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        email: usersTable.email,
+      })
+      .from(usersTable)
+      .where(inArray(usersTable.id, userIds)),
+  ]);
+
+  const nameByUserId = new Map<string, string>();
+  for (const user of userRows) {
+    nameByUserId.set(user.id, displayNameFromUser(user));
+  }
+  // Team member name wins when present (matches Assign UI labels).
+  for (const member of teamRows) {
+    if (member.userId && member.name.trim()) {
+      nameByUserId.set(member.userId, member.name.trim());
+    }
+  }
+
+  return leads.map((lead) => ({
+    ...lead,
+    assignedToName: lead.assignedToUserId
+      ? (nameByUserId.get(lead.assignedToUserId) ?? null)
+      : null,
+  }));
+}
+
+async function enrichLeads<T extends { id: number; assignedToUserId: string | null }>(leads: T[]) {
+  const withTags = await attachTags(leads);
+  return attachAssigneeNames(withTags);
+}
+
 // ── GET /api/lead-tags ─────────────────────────────────────────────────────
 router.get("/lead-tags", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
@@ -159,7 +224,7 @@ router.get("/leads", async (req: Request, res: Response): Promise<void> => {
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(asc(leadsTable.createdAt), asc(leadsTable.id));
 
-  res.json(await attachTags(leads));
+  res.json(await enrichLeads(leads));
 });
 
 // ── POST /api/leads/select-next ────────────────────────────────────────────
@@ -245,7 +310,7 @@ router.post("/leads", requireOwner, async (req: Request, res: Response) => {
     return [created];
   });
 
-  res.status(201).json((await attachTags([lead]))[0]);
+  res.status(201).json((await enrichLeads([lead]))[0]);
 });
 
 // ── POST /api/leads/import-apollo ──────────────────────────────────────────
@@ -572,7 +637,7 @@ router.patch("/leads/:id", async (req: Request, res: Response) => {
   });
 
   if (!updated) { res.status(404).json({ error: "not found" }); return; }
-  res.json((await attachTags([updated]))[0]);
+  res.json((await enrichLeads([updated]))[0]);
 });
 
 // ── DELETE /api/leads/:id ──────────────────────────────────────────────────
