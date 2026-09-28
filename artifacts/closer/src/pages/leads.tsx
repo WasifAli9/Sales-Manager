@@ -96,6 +96,15 @@ const LEAD_TYPE_TABS: Array<{ key: "all" | "end_user" | "reseller"; label: strin
   { key: "reseller",  label: "Resellers" },
 ]
 
+const ASSIGNEE_TABS: Array<{ key: "all" | "unassigned"; label: string }> = [
+  { key: "all",         label: "All assignees" },
+  { key: "unassigned",  label: "Unassigned" },
+]
+
+const SELECT_NEXT_PRESETS = [10, 25, 50, 100] as const
+const SELECT_NEXT_DEFAULT = 50
+const SELECT_NEXT_MAX = 500
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 function fullName(lead: Lead) {
   return [lead.firstName, lead.lastName].filter(Boolean).join(" ") || "Unknown"
@@ -180,18 +189,60 @@ async function fetchLeads(
   leadType: "all" | "end_user" | "reseller",
   tagIds: number[],
   tagMatch: "any" | "all",
+  assignedToUserId: "all" | "unassigned" = "all",
 ): Promise<Lead[]> {
   const params = new URLSearchParams()
   if (status !== "all") params.set("status", status)
   if (search) params.set("search", search)
   if (productId !== "all") params.set("productId", String(productId))
   if (leadType !== "all") params.set("leadType", leadType)
+  if (assignedToUserId !== "all") params.set("assignedToUserId", assignedToUserId)
   if (tagIds.length) {
     params.set("tagIds", tagIds.join(","))
     params.set("tagMatch", tagMatch)
   }
   const res = await fetch(`${BASE}/api/leads?${params}`, { credentials: "include" })
   if (!res.ok) throw new Error("Failed to fetch leads")
+  return res.json()
+}
+
+/** Fetch the next `limit` lead IDs matching current filters, excluding already-selected IDs. */
+async function fetchSelectNextIds(opts: {
+  status: string
+  search: string
+  productId: number | "all"
+  leadType: "all" | "end_user" | "reseller"
+  tagIds: number[]
+  tagMatch: "any" | "all"
+  assignedToUserId: "all" | "unassigned"
+  limit: number
+  excludeIds: number[]
+}): Promise<{ ids: number[]; selected: number; requested: number }> {
+  const body: Record<string, unknown> = {
+    limit: opts.limit,
+    excludeIds: opts.excludeIds,
+  }
+  if (opts.status !== "all") body.status = opts.status
+  if (opts.search) body.search = opts.search
+  if (opts.productId !== "all") body.productId = opts.productId
+  if (opts.leadType !== "all") body.leadType = opts.leadType
+  if (opts.assignedToUserId !== "all") body.assignedToUserId = opts.assignedToUserId
+  if (opts.tagIds.length) {
+    body.tagIds = opts.tagIds
+    body.tagMatch = opts.tagMatch
+  }
+
+  const res = await fetch(`${BASE}/api/leads/select-next`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 401) throw new Error("Session expired. Please sign in again.")
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string }
+    throw new Error(err.error || "Failed to select leads")
+  }
   return res.json()
 }
 
@@ -1160,17 +1211,29 @@ function BulkAssignDialog({
         credentials: "include",
         body: JSON.stringify({ leadIds, assignedToUserId: selectedUserId }),
       })
-      if (!res.ok) throw new Error("Failed")
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(err.error || "Failed")
+      }
+      const result = await res.json() as { updated: number; skipped?: number }
+      const updated = result.updated ?? leadIds.length
       const member = membersWithAccounts.find(m => m.userId === selectedUserId)
       toast({
         title: selectedUserId
-          ? `${leadIds.length} lead${leadIds.length !== 1 ? "s" : ""} assigned to ${member?.name}`
-          : `${leadIds.length} lead${leadIds.length !== 1 ? "s" : ""} unassigned`,
+          ? `${updated} lead${updated !== 1 ? "s" : ""} assigned to ${member?.name}`
+          : `${updated} lead${updated !== 1 ? "s" : ""} unassigned`,
+        description: result.skipped
+          ? `${result.skipped} no longer available and were skipped.`
+          : undefined,
       })
       qc.invalidateQueries({ queryKey: ["leads"] })
       onClose()
-    } catch {
-      toast({ title: "Failed to assign leads", variant: "destructive" })
+    } catch (error) {
+      toast({
+        title: "Failed to assign leads",
+        description: error instanceof Error ? error.message : undefined,
+        variant: "destructive",
+      })
     } finally {
       setSaving(false)
     }
@@ -1876,8 +1939,10 @@ function LeadCard({
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function LeadsPage() {
   const { toast } = useToast()
+  const { user } = useAuth()
   const fileRef = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
+  const isOwner = user?.role === "owner"
 
   const [view, setView] = useState<"leads" | "journal">("leads")
   const [selectMode, setSelectMode] = useState(false)
@@ -1890,10 +1955,14 @@ export default function LeadsPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [productFilter, setProductFilter] = useState<number | "all">("all")
   const [leadTypeFilter, setLeadTypeFilter] = useState<"all" | "end_user" | "reseller">("all")
+  const [assigneeFilter, setAssigneeFilter] = useState<"all" | "unassigned">("all")
   const [tagFilterIds, setTagFilterIds] = useState<number[]>([])
   const [tagMatch, setTagMatch] = useState<"any" | "all">("any")
   const [search, setSearch] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [selectNextCount, setSelectNextCount] = useState(SELECT_NEXT_DEFAULT)
+  const [selectNextInput, setSelectNextInput] = useState(String(SELECT_NEXT_DEFAULT))
+  const [selectingNext, setSelectingNext] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [emailLead, setEmailLead] = useState<Lead | null>(null)
@@ -1920,6 +1989,66 @@ export default function LeadsPage() {
     })
 
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()) }
+
+  const applySelectNextCount = (value: number) => {
+    const clamped = Math.min(SELECT_NEXT_MAX, Math.max(1, value))
+    setSelectNextCount(clamped)
+    setSelectNextInput(String(clamped))
+  }
+
+  const handleSelectNext = async () => {
+    const parsed = Number.parseInt(selectNextInput, 10)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > SELECT_NEXT_MAX) {
+      toast({
+        title: "Invalid number",
+        description: `Enter a whole number between 1 and ${SELECT_NEXT_MAX}.`,
+        variant: "destructive",
+      })
+      return
+    }
+    applySelectNextCount(parsed)
+    setSelectingNext(true)
+    try {
+      if (!selectMode) setSelectMode(true)
+      const result = await fetchSelectNextIds({
+        status: statusFilter,
+        search: debouncedSearch,
+        productId: productFilter,
+        leadType: leadTypeFilter,
+        tagIds: tagFilterIds,
+        tagMatch,
+        assignedToUserId: assigneeFilter,
+        limit: parsed,
+        excludeIds: [...selectedIds],
+      })
+      if (result.selected === 0) {
+        toast({ title: "No matching records available." })
+        return
+      }
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        for (const id of result.ids) next.add(id)
+        return next
+      })
+      if (result.selected < result.requested) {
+        toast({
+          title: `Only ${result.selected} matching record${result.selected === 1 ? "" : "s"} were available. Selected ${result.selected}.`,
+        })
+      } else {
+        toast({
+          title: `Selected next ${result.selected} record${result.selected === 1 ? "" : "s"}.`,
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Could not select leads",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setSelectingNext(false)
+    }
+  }
 
   const handleBulkDelete = async () => {
     const ids = [...selectedIds]
@@ -1954,8 +2083,8 @@ export default function LeadsPage() {
   const { data: products = [] } = useListProducts()
 
   const { data: leads = [], isLoading } = useQuery({
-    queryKey: ["leads", statusFilter, debouncedSearch, productFilter, leadTypeFilter, tagFilterIds, tagMatch],
-    queryFn: () => fetchLeads(statusFilter, debouncedSearch, productFilter, leadTypeFilter, tagFilterIds, tagMatch),
+    queryKey: ["leads", statusFilter, debouncedSearch, productFilter, leadTypeFilter, assigneeFilter, tagFilterIds, tagMatch],
+    queryFn: () => fetchLeads(statusFilter, debouncedSearch, productFilter, leadTypeFilter, tagFilterIds, tagMatch, assigneeFilter),
   })
 
   const selectedLeads = leads.filter(l => selectedIds.has(l.id))
@@ -2242,26 +2371,83 @@ export default function LeadsPage() {
               )
             })()}
 
-            {/* Select mode hint */}
+            {/* Select mode hint + select next X */}
             {selectMode && (
-              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-primary/5 border border-primary/20">
-                <CheckSquare2 className="w-4 h-4 text-primary shrink-0" />
-                <p className="text-xs text-primary/80 flex-1">Tap leads to select, then delete, assign, or schedule.</p>
-                <button
-                  onClick={() => {
-                    if (selectedIds.size === leads.length) {
-                      setSelectedIds(new Set())
-                    } else {
-                      setSelectedIds(new Set(leads.map(l => l.id)))
-                    }
-                  }}
-                  className="text-xs text-primary font-medium hover:text-primary/80 transition-colors shrink-0"
-                >
-                  {selectedIds.size === leads.length ? "Deselect all" : "Select all"}
-                </button>
-                <button onClick={exitSelectMode} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-primary/5 border border-primary/20">
+                  <CheckSquare2 className="w-4 h-4 text-primary shrink-0" />
+                  <p className="text-xs text-primary/80 flex-1">Tap leads to select, then delete, assign, or schedule.</p>
+                  <button
+                    onClick={() => {
+                      if (selectedIds.size === leads.length) {
+                        setSelectedIds(new Set())
+                      } else {
+                        setSelectedIds(new Set(leads.map(l => l.id)))
+                      }
+                    }}
+                    className="text-xs text-primary font-medium hover:text-primary/80 transition-colors shrink-0"
+                  >
+                    {selectedIds.size === leads.length ? "Deselect all" : "Select all"}
+                  </button>
+                  <button onClick={exitSelectMode} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl border border-border/30 bg-muted/15">
+                  <span className="text-xs text-muted-foreground shrink-0">Select next</span>
+                  <div className="flex gap-1">
+                    {SELECT_NEXT_PRESETS.map(n => (
+                      <button
+                        key={n}
+                        type="button"
+                        disabled={selectingNext}
+                        onClick={() => applySelectNextCount(n)}
+                        className={cn(
+                          "text-xs px-2.5 py-1 rounded-full border whitespace-nowrap transition-all",
+                          selectNextCount === n
+                            ? "bg-primary/15 text-primary border-primary/30"
+                            : "text-muted-foreground border-border/30 hover:border-border"
+                        )}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={SELECT_NEXT_MAX}
+                    value={selectNextInput}
+                    disabled={selectingNext}
+                    onChange={e => setSelectNextInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void handleSelectNext()
+                      }
+                    }}
+                    className="h-8 w-16 bg-muted/40 border-border/30 text-xs px-2"
+                    aria-label="Number of records to select next"
+                  />
+                  <span className="text-xs text-muted-foreground">records</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 border-primary/40 text-primary gap-1.5"
+                    disabled={selectingNext}
+                    onClick={() => void handleSelectNext()}
+                  >
+                    {selectingNext ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Selecting…
+                      </>
+                    ) : (
+                      "Select"
+                    )}
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -2308,6 +2494,26 @@ export default function LeadsPage() {
                 </button>
               ))}
             </div>
+
+            {/* Assignee filter — owners only (members already see only their own leads) */}
+            {isOwner && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-none">
+                {ASSIGNEE_TABS.map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setAssigneeFilter(tab.key)}
+                    className={cn(
+                      "text-xs px-3 py-1.5 rounded-full border whitespace-nowrap shrink-0 transition-all",
+                      assigneeFilter === tab.key
+                        ? "bg-sky-400/15 text-sky-400 border-sky-400/30"
+                        : "text-muted-foreground border-border/30 hover:border-border"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Product filter — only shown when there are multiple products */}
             {products.length > 1 && (

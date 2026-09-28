@@ -1,11 +1,17 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { leadsTable, productsTable, emailSendsTable, leadTagsTable, leadTagAssignmentsTable } from "@workspace/db/schema";
-import { eq, ilike, or, and, inArray, sql } from "drizzle-orm";
+import { eq, and, inArray, sql, notInArray, asc } from "drizzle-orm";
 import { requireOwner } from "../middlewares/requireOwner";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { parseCSV, mapApolloRow, runImportApollo, type MappedRow } from "../lib/importApolloHelpers";
 import { findOrCreateCompany, enqueueCompanyResearch, writeAudit } from "../lib/lead-intelligence/companyService";
+import {
+  buildLeadListConditions,
+  parseExcludeIds,
+  parseSelectNextLimit,
+  type LeadListFilterParams,
+} from "../lib/leadListQuery";
 
 const router: IRouter = Router();
 
@@ -144,72 +150,54 @@ router.delete("/lead-tags/:id", requireOwner, async (req: Request, res: Response
 router.get("/leads", async (req: Request, res: Response): Promise<void> => {
   if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
 
-  const { status, search, productId, leadType, tagIds, tagMatch } = req.query as {
-    status?: string; search?: string; productId?: string; leadType?: string; tagIds?: string; tagMatch?: string;
-  };
-
-  const conditions = [];
-
-  // Members see only leads assigned to them
-  if (req.user.role !== "owner") {
-    conditions.push(eq(leadsTable.assignedToUserId, req.user.id));
-  }
-
-  if (status && status !== "all") {
-    conditions.push(eq(leadsTable.status, status));
-  }
-
-  if (productId && productId !== "all") {
-    const pid = parseInt(productId, 10);
-    if (!isNaN(pid)) conditions.push(eq(leadsTable.productId, pid));
-  }
-
-  if (leadType === "end_user" || leadType === "reseller") {
-    conditions.push(eq(leadsTable.leadType, leadType));
-  }
-
-  const selectedTagIds = (tagIds ?? "").split(",")
-    .map((id) => Number(id))
-    .filter((id) => Number.isInteger(id) && id > 0);
-  if (selectedTagIds.length) {
-    const uniqueTagIds = [...new Set(selectedTagIds)];
-    if (tagMatch === "all") {
-      conditions.push(sql`(
-        SELECT count(distinct ${leadTagAssignmentsTable.tagId})
-        FROM ${leadTagAssignmentsTable}
-        WHERE ${eq(leadTagAssignmentsTable.leadId, leadsTable.id)}
-          AND ${inArray(leadTagAssignmentsTable.tagId, uniqueTagIds)}
-      ) = ${uniqueTagIds.length}`);
-    } else {
-      conditions.push(sql`EXISTS (
-        SELECT 1
-        FROM ${leadTagAssignmentsTable}
-        WHERE ${eq(leadTagAssignmentsTable.leadId, leadsTable.id)}
-          AND ${inArray(leadTagAssignmentsTable.tagId, uniqueTagIds)}
-      )`);
-    }
-  }
-
-  if (search && search.trim()) {
-    const term = `%${search.trim()}%`;
-    conditions.push(
-      or(
-        ilike(leadsTable.firstName, term),
-        ilike(leadsTable.lastName, term),
-        ilike(leadsTable.company, term),
-        ilike(leadsTable.email, term),
-        ilike(leadsTable.title, term),
-      )
-    );
-  }
+  const filters = req.query as LeadListFilterParams;
+  const conditions = buildLeadListConditions(req.user, filters);
 
   const leads = await db
     .select()
     .from(leadsTable)
     .where(conditions.length ? and(...conditions) : undefined)
-    .orderBy(leadsTable.createdAt);
+    .orderBy(asc(leadsTable.createdAt), asc(leadsTable.id));
 
   res.json(await attachTags(leads));
+});
+
+// ── POST /api/leads/select-next ────────────────────────────────────────────
+// Returns the next `limit` lead IDs matching the same filters as GET /leads,
+// excluding already-selected IDs. Ordered by createdAt ASC, id ASC (stable).
+router.post("/leads/select-next", async (req: Request, res: Response): Promise<void> => {
+  if (!req.isAuthenticated()) { res.status(401).json({ error: "Not authenticated" }); return; }
+
+  const body = (req.body ?? {}) as LeadListFilterParams & {
+    limit?: unknown;
+    excludeIds?: unknown;
+  };
+
+  const limit = parseSelectNextLimit(body.limit);
+  if (limit === null) {
+    res.status(400).json({ error: "limit must be an integer between 1 and 500" });
+    return;
+  }
+
+  const excludeIds = parseExcludeIds(body.excludeIds);
+  const conditions = buildLeadListConditions(req.user, body);
+  if (excludeIds.length) {
+    conditions.push(notInArray(leadsTable.id, excludeIds));
+  }
+
+  const rows = await db
+    .select({ id: leadsTable.id })
+    .from(leadsTable)
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(asc(leadsTable.createdAt), asc(leadsTable.id))
+    .limit(limit);
+
+  const ids = rows.map((row) => row.id);
+  res.json({
+    ids,
+    selected: ids.length,
+    requested: limit,
+  });
 });
 
 // ── POST /api/leads ────────────────────────────────────────────────────────
@@ -412,12 +400,35 @@ router.patch("/leads/bulk-assign", requireOwner, async (req: Request, res: Respo
     return;
   }
 
+  const uniqueIds = [...new Set(
+    leadIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0),
+  )];
+  if (!uniqueIds.length) {
+    res.status(400).json({ error: "leadIds must be a non-empty array" });
+    return;
+  }
+
+  // Re-validate IDs still exist before assigning (guards against stale client state).
+  const existing = await db
+    .select({ id: leadsTable.id })
+    .from(leadsTable)
+    .where(inArray(leadsTable.id, uniqueIds));
+  const existingIds = existing.map((row) => row.id);
+  if (!existingIds.length) {
+    res.status(404).json({ error: "No matching leads found" });
+    return;
+  }
+
   await db
     .update(leadsTable)
     .set({ assignedToUserId: assignedToUserId || null })
-    .where(inArray(leadsTable.id, leadIds));
+    .where(inArray(leadsTable.id, existingIds));
 
-  res.json({ updated: leadIds.length });
+  res.json({
+    updated: existingIds.length,
+    requested: uniqueIds.length,
+    skipped: uniqueIds.length - existingIds.length,
+  });
 });
 
 // ── PATCH /api/leads/bulk-tags ─────────────────────────────────────────────
