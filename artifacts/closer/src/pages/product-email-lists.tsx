@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useParams } from "wouter"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Check, CheckSquare2, ListChecks, Loader2, Pencil, Plus, Search, Square, Trash2, UserPlus, Users, X } from "lucide-react"
+import { ArrowLeft, Check, CheckSquare2, ListChecks, Loader2, Pencil, Plus, Search, Square, Tags, Trash2, UserPlus, Users, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useProductDetail } from "@/hooks/use-products"
 import { Breadcrumbs } from "@/components/breadcrumbs"
+import { TagPicker } from "@/components/tag-picker"
 import { useToast } from "@/hooks/use-toast"
+import { cn } from "@/lib/utils"
 
 const BASE = import.meta.env.BASE_URL?.replace(/\/$/, "") || ""
 
@@ -52,8 +54,17 @@ async function fetchContactLists(productId: number): Promise<ContactList[]> {
   return response.json()
 }
 
-async function fetchProductLeads(productId: number): Promise<Lead[]> {
-  const response = await fetch(`${BASE}/api/leads?productId=${productId}`, { credentials: "include" })
+async function fetchProductLeads(
+  productId: number,
+  tagIds: number[] = [],
+  tagMatch: "any" | "all" = "any",
+): Promise<Lead[]> {
+  const params = new URLSearchParams({ productId: String(productId) })
+  if (tagIds.length) {
+    params.set("tagIds", tagIds.join(","))
+    params.set("tagMatch", tagMatch)
+  }
+  const response = await fetch(`${BASE}/api/leads?${params}`, { credentials: "include" })
   if (!response.ok) throw new Error("Could not load product leads")
   return response.json()
 }
@@ -184,6 +195,8 @@ export default function ProductEmailLists() {
   const queryClient = useQueryClient()
   const [name, setName] = useState("")
   const [search, setSearch] = useState("")
+  const [tagFilterIds, setTagFilterIds] = useState<number[]>([])
+  const [tagMatch, setTagMatch] = useState<"any" | "all">("any")
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<number>>(new Set())
   const [editingListId, setEditingListId] = useState<number | null>(null)
   const [loadingListId, setLoadingListId] = useState<number | null>(null)
@@ -195,8 +208,8 @@ export default function ProductEmailLists() {
     enabled: Number.isInteger(productId) && productId > 0,
   })
   const leadsQuery = useQuery({
-    queryKey: ["product-contact-list-leads", productId],
-    queryFn: () => fetchProductLeads(productId),
+    queryKey: ["product-contact-list-leads", productId, tagFilterIds, tagMatch],
+    queryFn: () => fetchProductLeads(productId, tagFilterIds, tagMatch),
     enabled: Number.isInteger(productId) && productId > 0,
   })
 
@@ -437,14 +450,47 @@ export default function ProductEmailLists() {
               </Button>
             </div>
 
-            <div className="max-h-[430px] overflow-y-auto rounded-xl border border-border/70">
+            <div className="rounded-xl border border-border/30 bg-muted/15 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Tags className="w-3.5 h-3.5" /> Filter by tags
+                </p>
+                {tagFilterIds.length > 1 && (
+                  <div className="flex rounded-lg border border-border/30 p-0.5">
+                    {(["any", "all"] as const).map(match => (
+                      <button
+                        key={match}
+                        type="button"
+                        onClick={() => setTagMatch(match)}
+                        className={cn(
+                          "rounded-md px-2 py-1 text-[10px] font-medium capitalize",
+                          tagMatch === match ? "bg-primary/15 text-primary" : "text-muted-foreground",
+                        )}
+                      >
+                        {match}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <TagPicker
+                value={tagFilterIds}
+                onChange={setTagFilterIds}
+                label={tagFilterIds.length > 1 ? `Match ${tagMatch}` : "Choose one or more tags"}
+                allowCreate={false}
+              />
+            </div>
+
+            <div className="max-h-[430px] overflow-y-auto rounded-xl border border-border/70 app-scroll">
               {leadsQuery.isLoading ? (
                 <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading product leads…
                 </div>
               ) : visibleLeads.length === 0 ? (
                 <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  {search ? "No eligible leads match that search." : (
+                  {search || tagFilterIds.length > 0 ? (
+                    "No eligible leads match that search or tag filter."
+                  ) : (
                     <div className="space-y-3">
                       <p>This product has no leads with an email address yet.</p>
                       <Button type="button" size="sm" className="gap-1.5 rounded-xl" onClick={() => setAddContactOpen(true)}>
@@ -516,7 +562,7 @@ export default function ProductEmailLists() {
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Select product leads on the left, name the audience, and save it for future campaigns.</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="max-h-[520px] space-y-2 overflow-y-auto app-scroll pr-1">
               {lists.map(list => {
                 const active = editingListId === list.id
                 const loading = loadingListId === list.id

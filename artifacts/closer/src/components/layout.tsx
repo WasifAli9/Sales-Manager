@@ -238,21 +238,22 @@ function MobileNav() {
 export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="flex min-h-dvh flex-col text-foreground lg:h-dvh lg:min-h-0 lg:flex-row lg:overflow-hidden"
+      className="flex h-dvh min-h-0 flex-col overflow-hidden text-foreground lg:flex-row"
       style={{ backgroundColor: "var(--shell-bg)" }}
     >
       <SideNav />
 
-      <div className="flex min-h-0 min-w-0 flex-1 justify-center lg:justify-start lg:overflow-hidden lg:bg-background">
+      <div className="flex min-h-0 min-w-0 flex-1 justify-center overflow-hidden lg:justify-start lg:bg-background">
         <div
           className={cn(
-            "relative flex w-full min-h-dvh flex-col bg-background",
+            "relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background",
             "max-w-md shadow-2xl border-x border-border/20",
-            "lg:h-full lg:min-h-0 lg:max-w-none lg:overflow-hidden lg:shadow-none lg:border-none",
+            "lg:max-w-none lg:shadow-none lg:border-none",
           )}
         >
           <MobileNav />
-          <main className="relative min-w-0 flex-1 overflow-x-hidden lg:app-scroll lg:min-h-0 lg:overflow-y-auto">
+          {/* Single page scrollport — sidebar/header stay fixed */}
+          <main className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto app-scroll">
             <PasskeySetupBanner />
             <div className="lg:mx-auto lg:w-full lg:max-w-5xl">
               {children}
