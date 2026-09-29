@@ -29,6 +29,32 @@ import { getOrgEmailSendSettings, spreadSendTime } from "../lib/emailDailyQuota"
 
 const router: IRouter = Router();
 
+/** Keep bulk inserts under Postgres bind limits (~65535 params) and avoid huge HTML payloads. */
+const EMAIL_SEND_INSERT_CHUNK = 100;
+
+type EmailSendInsert = typeof emailSendsTable.$inferInsert;
+
+async function insertEmailSendsInChunks(
+  executor: { insert: typeof db.insert },
+  values: EmailSendInsert[],
+): Promise<void> {
+  for (let i = 0; i < values.length; i += EMAIL_SEND_INSERT_CHUNK) {
+    const chunk = values.slice(i, i + EMAIL_SEND_INSERT_CHUNK);
+    await executor.insert(emailSendsTable).values(chunk);
+  }
+}
+
+/** Never leak Drizzle "Failed query…params:" dumps (full HTML bodies) to the client. */
+function clientSafeErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  const msg = error.message.trim();
+  if (!msg) return fallback;
+  if (/^Failed query:/i.test(msg) || msg.includes("\nparams:") || msg.length > 300) {
+    return fallback;
+  }
+  return msg;
+}
+
 const stepInputSchema = z.object({
   name: z.string().trim().max(120).optional().nullable(),
   delayDays: z.number().int().min(0).max(3650),
@@ -381,7 +407,7 @@ async function scheduleSequence(
   senderUserId?: string | null,
 ) {
   const prepared = await prepareSequenceSchedule(sequenceId, requestedLeadIds, startDate, batchId, senderUserId);
-  if (prepared.values.length) await db.insert(emailSendsTable).values(prepared.values);
+  if (prepared.values.length) await insertEmailSendsInChunks(db, prepared.values);
   return prepared.result;
 }
 
@@ -823,7 +849,7 @@ router.post("/email-sequences/:id/enroll", async (req: Request, res: Response): 
     const result = await scheduleSequence(sequenceId, permittedLeadIds, startAt, randomUUID(), req.user!.id);
     res.json(result);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : "Could not enroll contacts" });
+    res.status(400).json({ error: clientSafeErrorMessage(error, "Could not enroll contacts") });
   }
 });
 
@@ -893,7 +919,7 @@ router.post("/email-sequences/:id/launch", async (req: Request, res: Response): 
     const batchId = randomUUID();
     const prepared = await prepareSequenceSchedule(sequenceId, permittedLeadIds, startAt, batchId, req.user!.id);
     await db.transaction(async (tx) => {
-      if (prepared.values.length) await tx.insert(emailSendsTable).values(prepared.values);
+      if (prepared.values.length) await insertEmailSendsInChunks(tx, prepared.values);
       await tx.insert(emailCampaignsTable).values({
         batchId,
         name,
@@ -906,7 +932,7 @@ router.post("/email-sequences/:id/launch", async (req: Request, res: Response): 
     res.status(201).json({ ...prepared.result, name, contactListId, tagIds: tagIds ?? undefined, sequenceId });
   } catch (error) {
     req.log.error({ error, sequenceId, contactListId }, "Campaign launch failed");
-    res.status(400).json({ error: error instanceof Error ? error.message : "Could not launch campaign" });
+    res.status(400).json({ error: clientSafeErrorMessage(error, "Could not launch campaign") });
   }
 });
 

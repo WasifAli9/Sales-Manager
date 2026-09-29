@@ -701,7 +701,12 @@ export function ProductSequenceWorkspace({
       setCampaignName("")
       await qc.invalidateQueries({ queryKey: ["email-campaigns"] })
     } catch (error) {
-      toast({ title: "Campaign launch failed", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" })
+      const raw = error instanceof Error ? error.message : "Please try again."
+      const description =
+        raw.length > 280 || /Failed query:|<html|<\/div>/i.test(raw)
+          ? "Could not schedule this campaign. Please try again."
+          : raw
+      toast({ title: "Campaign launch failed", description, variant: "destructive" })
     } finally {
       setLaunching(false)
     }
