@@ -4,8 +4,8 @@ FROM node:26-bookworm-slim AS base
 WORKDIR /app
 ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
-ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
+# Node 26 slim no longer bundles corepack — install pnpm via npm instead.
+RUN npm install -g pnpm@11.22.0
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc tsconfig.json tsconfig.base.json ./
