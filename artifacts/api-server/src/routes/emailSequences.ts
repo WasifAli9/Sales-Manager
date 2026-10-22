@@ -492,50 +492,102 @@ ${waits || "Only one email."}
 
 Write human, concise outreach. Avoid corporate filler and do not use bullets in the email bodies. Use at most one clear CTA per email. You may use {{firstName}}, {{company}}, {{title}}, {{lastName}}, and {{email}} as merge fields.
 
+CRITICAL — STEP COUNT:
+- The "steps" array MUST contain EXACTLY ${emailCount} objects. Not ${Math.max(1, emailCount - 1)}, not ${emailCount + 1}.
+- If you are running long, shorten each body rather than omitting emails.
+
 BODY FORMAT (critical):
 - Write each email body as plain text with clear paragraph breaks.
 - Separate EVERY paragraph with a blank line (use \\n\\n between paragraphs).
 - Keep paragraphs short (1–3 sentences each). Never return one long run-on block.
 - Put greeting, problem, value, CTA, and sign-off in separate paragraphs when present.
-- Example shape:
-Hi {{firstName}},
-
-Quick question about {{company}}.
-
-Here is the idea in one short paragraph.
-
-Here is the CTA link on its own line:
-https://example.com
-
-Best,
-Name
+- Keep each body under ~400 words so the full sequence fits in one response.
 
 Return only JSON:
-{"name":"sequence name","description":"short optional description","steps":[{"name":"optional step name","subject":"subject","body":"plain-text email body with blank lines between paragraphs"}]}`;
+{"name":"sequence name","description":"short optional description","steps":[{"name":"optional step name","subject":"subject","body":"plain-text email body with blank lines between paragraphs"}]}
+The steps array length must equal ${emailCount}.`;
+
+  const systemPrompt =
+    `You are an experienced B2B sales copywriter. Return only valid JSON matching the requested shape. ` +
+    `Email bodies MUST include blank lines between paragraphs. ` +
+    `The steps array MUST contain exactly ${emailCount} emails.`;
+
+  /** Enough headroom for long briefs + up to ~12 emails without truncating mid-JSON. */
+  const maxCompletionTokens = Math.min(32_000, Math.max(8_000, emailCount * 2_500));
+  const maxAttempts = 3;
 
   try {
-    const { json } = await runJson(
-      "You are an experienced B2B sales copywriter. Return only valid JSON matching the requested shape. Email bodies MUST include blank lines between paragraphs.",
-      prompt,
-    );
-    const generated = generatedSequenceSchema.safeParse(json);
-    if (!generated.success || generated.data.steps.length !== emailCount) {
-      req.log.warn({ emailCount }, "AI returned an invalid sequence draft");
-      res.status(502).json({ error: "The AI returned an incomplete sequence. Please try again." });
+    let lastStepCount: number | null = null;
+    let lastFinishReason: string | null = null;
+    let lastParseOk = false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const retryHint = attempt > 1
+        ? `\n\nRETRY ${attempt}/${maxAttempts}: Your previous reply had ${lastStepCount ?? "an invalid"} step(s) (finish_reason=${lastFinishReason ?? "unknown"}). Return EXACTLY ${emailCount} complete steps this time. Shorten bodies if needed.`
+        : "";
+
+      const { json, finishReason } = await runJson(
+        systemPrompt,
+        prompt + retryHint,
+        { maxCompletionTokens },
+      );
+      lastFinishReason = finishReason;
+
+      const generated = generatedSequenceSchema.safeParse(json);
+      lastParseOk = generated.success;
+      lastStepCount = generated.success ? generated.data.steps.length : null;
+
+      if (!generated.success) {
+        req.log.warn(
+          { emailCount, attempt, finishReason, issues: generated.error.issues.slice(0, 5) },
+          "AI returned an invalid sequence draft",
+        );
+        if (attempt < maxAttempts) continue;
+        break;
+      }
+
+      // Too few steps → retry. Too many → use the first emailCount.
+      if (generated.data.steps.length < emailCount) {
+        req.log.warn(
+          { emailCount, attempt, got: generated.data.steps.length, finishReason },
+          "AI returned an incomplete sequence draft",
+        );
+        if (attempt < maxAttempts) continue;
+        break;
+      }
+
+      const steps = generated.data.steps.slice(0, emailCount);
+      if (generated.data.steps.length > emailCount) {
+        req.log.info(
+          { emailCount, got: generated.data.steps.length, attempt },
+          "AI returned extra sequence steps; truncating to requested count",
+        );
+      }
+
+      let day = 0;
+      res.json({
+        name: generated.data.name,
+        description: generated.data.description ?? null,
+        steps: steps.map((step, index) => {
+          if (index > 0) day += delaysBetweenEmails[index - 1];
+          return {
+            ...step,
+            body: emailBodyToHtml(step.body),
+            delayDays: day,
+          };
+        }),
+      });
       return;
     }
-    let day = 0;
-    res.json({
-      name: generated.data.name,
-      description: generated.data.description ?? null,
-      steps: generated.data.steps.map((step, index) => {
-        if (index > 0) day += delaysBetweenEmails[index - 1];
-        return {
-          ...step,
-          body: emailBodyToHtml(step.body),
-          delayDays: day,
-        };
-      }),
+
+    req.log.warn(
+      { emailCount, lastStepCount, lastFinishReason, lastParseOk, attempts: maxAttempts },
+      "AI sequence generation exhausted retries",
+    );
+    res.status(502).json({
+      error: lastFinishReason === "length"
+        ? "The AI ran out of space before finishing every email. Try fewer emails, or shorten the brief, then try again."
+        : "The AI returned an incomplete sequence. Please try again.",
     });
   } catch (error) {
     req.log.error({ error }, "Sequence generation failed");

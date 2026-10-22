@@ -11,15 +11,28 @@ export function createDirectOpenAI(): OpenAI {
 
 const openai = createDirectOpenAI();
 
+export type RunJsonOptions = {
+  /** Max completion tokens (gpt-5 uses max_completion_tokens). Default: model default. */
+  maxCompletionTokens?: number;
+};
+
+export type RunJsonResult = {
+  json: unknown;
+  modelUsed: string;
+  finishReason: string | null;
+  /** Raw assistant text before JSON parse (for diagnostics). */
+  rawText: string;
+};
+
 /**
  * Run a single LLM call and parse the response as strict JSON.
  * Uses the caller's OPENAI_API_KEY secret directly via the official SDK.
- * Returns the parsed JSON and the model identifier used.
  */
 export async function runJson(
   system: string,
   user: string,
-): Promise<{ json: unknown; modelUsed: string }> {
+  options: RunJsonOptions = {},
+): Promise<RunJsonResult> {
   if (!process.env.OPENAI_API_KEY?.trim()) {
     throw new Error("OPENAI_API_KEY is not set");
   }
@@ -31,10 +44,19 @@ export async function runJson(
       { role: "user", content: user },
     ],
     response_format: { type: "json_object" },
+    ...(options.maxCompletionTokens
+      ? { max_completion_tokens: options.maxCompletionTokens }
+      : {}),
   });
 
-  const text = completion.choices[0]?.message?.content ?? "";
-  return { json: parseJsonLoose(text), modelUsed: OPENAI_MODEL };
+  const choice = completion.choices[0];
+  const text = choice?.message?.content ?? "";
+  return {
+    json: parseJsonLoose(text),
+    modelUsed: OPENAI_MODEL,
+    finishReason: choice?.finish_reason ?? null,
+    rawText: text,
+  };
 }
 
 /** Parse model output as JSON, tolerating markdown fences or stray prose. */

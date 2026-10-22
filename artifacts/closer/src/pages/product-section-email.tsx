@@ -414,24 +414,29 @@ export function ProductSequenceWorkspace({
 
     const startedAt = Date.now()
     const stages = [
-      { after: 0, progress: 8, label: "Saving your product brief…" },
-      { after: 700, progress: 28, label: "Writing subject lines for each email…" },
-      { after: 1800, progress: 56, label: "Drafting the email bodies and cadence…" },
-      { after: 3600, progress: 84, label: "Preparing your editable sequence preview…" },
+      { after: 0, progress: 6, label: "Saving your product brief…" },
+      { after: 1_000, progress: 18, label: "Writing subject lines for each email…" },
+      { after: 8_000, progress: 36, label: "Drafting the email bodies and cadence…" },
+      { after: 25_000, progress: 55, label: "Polishing copy and CTA placement…" },
+      { after: 60_000, progress: 72, label: "Still generating — larger sequences can take a few minutes…" },
+      { after: 120_000, progress: 84, label: "Almost there — assembling your editable preview…" },
+      { after: 180_000, progress: 90, label: "Finalising sequence (retrying if needed)…" },
     ]
 
     const updateProgress = () => {
       const elapsed = Date.now() - startedAt
       const stage = [...stages].reverse().find(item => elapsed >= item.after) ?? stages[0]
       const nextStage = stages.find(item => item.after > elapsed)
-      const stageSpan = nextStage ? nextStage.after - stage.after : 9000
-      const stageProgress = nextStage ? Math.min(10, Math.floor(((elapsed - stage.after) / stageSpan) * 10)) : Math.min(8, Math.floor((elapsed - stage.after) / 1400))
+      const stageSpan = nextStage ? nextStage.after - stage.after : 60_000
+      const stageProgress = nextStage
+        ? Math.min(6, Math.floor(((elapsed - stage.after) / stageSpan) * 6))
+        : Math.min(4, Math.floor((elapsed - stage.after) / 30_000))
       setGenerationPhase(stage.label)
-      setGenerationProgress(Math.min(92, stage.progress + stageProgress))
+      setGenerationProgress(Math.min(94, stage.progress + stageProgress))
     }
 
     updateProgress()
-    const timer = window.setInterval(updateProgress, 250)
+    const timer = window.setInterval(updateProgress, 400)
     return () => window.clearInterval(timer)
   }, [generating])
 
